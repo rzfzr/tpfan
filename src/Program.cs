@@ -15,6 +15,9 @@ static class Program {
         string cmd = a.Length > 0 ? a[0] : "status";
         try {
             switch (cmd) {
+                case "service":   // started by the SCM
+                    System.ServiceProcess.ServiceBase.Run(new FanService(new Controller(CfgPath, DataDir)));
+                    return 0;
                 case "run": {   // foreground; Ctrl+C hands the fan back to the BIOS
                     var c = new Controller(a.Length > 1 ? a[1] : CfgPath, DataDir);
                     Console.CancelKeyPress += (_, e) => { e.Cancel = true; c.Stop(); };
