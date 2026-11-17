@@ -1,0 +1,18 @@
+// tpfan config, reloaded automatically when saved. Temperatures are AMD Tctl in °C.
+// Measured on this E14 Gen 5 (EC register 0x2F):
+//   0 = off, 1 = 2200 rpm, 2 = 2500 rpm, 3..7 = 4200 rpm (all identical), 40 = full 6300 rpm,
+//   80 = BIOS auto, which uses finer internal speeds (~2100/3300/3600/3800 rpm) but tops out ~3800.
+// So: let the BIOS run the normal range, take over only above what it reaches.
+{
+  "PollMs": 500,
+  "SmoothSec": 6,        // average Tctl over ~6 s so boost spikes don't move the fan
+  "UpDwellSec": 4,       // at most one step up every 4 s
+  "DownHoldSec": 25,     // must be cooler than Down for 25 s before stepping down
+  "EmergencyTemp": 95,   // raw Tctl >= 95 for 5 s -> top step (capped at 97 in code)
+  "EmergencySec": 5,
+  // Top step is 4200 rpm on purpose: full speed (40) is never used.
+  "Steps": [
+    { "Ec": "80", "Up": 0,  "Down": 0,  "Note": "BIOS auto" },
+    { "Ec": "7",  "Up": 85, "Down": 78, "Note": "4200 rpm" }
+  ]
+}

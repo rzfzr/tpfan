@@ -7,16 +7,28 @@ using System.Text;
 using System.Threading;
 
 static class Program {
+    public static readonly string DataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "tpfan");
+    static string CfgPath => Path.Combine(DataDir, "config.json");
+
     static int Main(string[] a) {
         CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
-        string cmd = a.Length > 0 ? a[0] : "monitor";
+        string cmd = a.Length > 0 ? a[0] : "status";
         try {
             switch (cmd) {
+                case "run": {   // foreground; Ctrl+C hands the fan back to the BIOS
+                    var c = new Controller(a.Length > 1 ? a[1] : CfgPath, DataDir);
+                    Console.CancelKeyPress += (_, e) => { e.Cancel = true; c.Stop(); };
+                    c.Run(); return 0;
+                }
+                case "status": Console.Write(File.ReadAllText(Path.Combine(DataDir, "status.txt"))); return 0;
+                case "check": Config.Load(a.Length > 1 ? a[1] : CfgPath); Console.WriteLine("config ok"); return 0;
                 case "dump": return Dump();
                 case "monitor": return Monitor(a.Length > 1 ? int.Parse(a[1]) : 10);
                 case "set": return Set(a[1]);
                 case "probe": return Probe(a.Length > 1 ? a[1] : "probe.log");
-                default: Console.Error.WriteLine("usage: tpfan dump | monitor [s] | set <hex|auto> | probe [log]"); return 2;
+                default:
+                    Console.Error.WriteLine("usage: tpfan status | run [config] | check [config] | dump | monitor [s] | set <hex|auto> | probe [log]");
+                    return 2;
             }
         } catch (Exception e) { Console.Error.WriteLine(e); return 1; }
     }
