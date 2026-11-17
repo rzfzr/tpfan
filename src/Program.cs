@@ -1,0 +1,98 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading;
+
+static class Program {
+    static int Main(string[] a) {
+        CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
+        string cmd = a.Length > 0 ? a[0] : "monitor";
+        try {
+            switch (cmd) {
+                case "dump": return Dump();
+                case "monitor": return Monitor(a.Length > 1 ? int.Parse(a[1]) : 10);
+                case "set": return Set(a[1]);
+                case "probe": return Probe(a.Length > 1 ? a[1] : "probe.log");
+                default: Console.Error.WriteLine("usage: tpfan dump | monitor [s] | set <hex|auto> | probe [log]"); return 2;
+            }
+        } catch (Exception e) { Console.Error.WriteLine(e); return 1; }
+    }
+
+    static byte[] DumpEc(Ec ec) { var b = new byte[256]; for (int i = 0; i < 256; i++) b[i] = ec.Read((byte)i); return b; }
+    static string Hex(byte[] b) {
+        var sb = new StringBuilder("      " + string.Join(" ", Enumerable.Range(0, 16).Select(i => $" {i:X}")) + "\n");
+        for (int r = 0; r < 16; r++) sb.Append($"{r * 16:X2}:  " + string.Join(" ", b.Skip(r * 16).Take(16).Select(x => x.ToString("X2"))) + "\n");
+        return sb.ToString();
+    }
+    static int Dump() { using var ec = new Ec(); Console.Write(Hex(DumpEc(ec))); return 0; }
+
+    static string Line(Ec ec, AmdTemp t) {
+        var temps = string.Join(",", Enumerable.Range(0x78, 8).Select(i => ec.Read((byte)i)));
+        return $"{DateTime.Now:HH:mm:ss} tctl={t.Tctl(),5:F1} ec78={temps} 2F=0x{ec.Read(Tp.FanCtl):X2} rpm={Tp.Rpm(ec)}";
+    }
+    static int Monitor(int secs) {
+        using var ec = new Ec(); using var t = new AmdTemp();
+        for (int i = 0; i < secs; i++) { Console.WriteLine(Line(ec, t)); Thread.Sleep(1000); }
+        return 0;
+    }
+    static int Set(string v) {
+        using var ec = new Ec();
+        byte b = v == "auto" ? (byte)0x80 : Convert.ToByte(v, 16);
+        ec.Write(Tp.FanCtl, b); Thread.Sleep(100);
+        Console.WriteLine($"2F=0x{ec.Read(Tp.FanCtl):X2}"); return 0;
+    }
+
+    /// Steps through every fan level, records steady RPM and an EC dump for each, then measures
+    /// BIOS auto mode under full CPU load. Stop any other fan controller first.
+    static int Probe(string logPath) {
+        using var ec = new Ec(); using var t = new AmdTemp();
+        using var log = new StreamWriter(logPath) { AutoFlush = true };
+        void L(string s) { Console.WriteLine(s); log.WriteLine(s); }
+        L($"start 2F=0x{ec.Read(Tp.FanCtl):X2}");
+        L("== auto baseline"); L(Hex(DumpEc(ec)));
+        var levels = new byte[] { 0x40, 7, 6, 5, 4, 3, 2, 1, 2, 3, 4, 5, 6, 7, 0x40, 0 };
+        var summary = new List<string>();
+        try {
+            foreach (var lv in levels) {
+                ec.Write(Tp.FanCtl, lv);
+                var rpms = new List<int>();
+                int secs = lv == 0 ? 6 : 14;
+                for (int s = 0; s < secs; s++) {
+                    Thread.Sleep(1000);
+                    double tc = t.Tctl();
+                    int rpm = Tp.Rpm(ec);
+                    if (s >= secs - 5) rpms.Add(rpm);
+                    L($"  lv=0x{lv:X2} s={s,2} tctl={tc:F1} rpm={rpm} 2F=0x{ec.Read(Tp.FanCtl):X2}");
+                    if (tc > 99) throw new Exception("too hot, aborting");
+                }
+                var row = $"level 0x{lv:X2}: rpm avg={rpms.Average():F0} min={rpms.Min()} max={rpms.Max()}";
+                summary.Add(row); L(row);
+                L($"== dump at level 0x{lv:X2}"); L(Hex(DumpEc(ec)));
+            }
+        } finally {
+            ec.Write(Tp.FanCtl, 0x80);
+            L($"restored auto, 2F=0x{ec.Read(Tp.FanCtl):X2}");
+        }
+        L("== SUMMARY"); foreach (var s in summary) L(s);
+
+        L("== AUTO UNDER LOAD (180s load, then 90s idle)");
+        ec.Write(Tp.FanCtl, 0x80);
+        bool stop = false;
+        var threads = Enumerable.Range(0, Environment.ProcessorCount).Select(_ => new Thread(() => { double x = 1; while (!Volatile.Read(ref stop)) x = Math.Sqrt(x + 1.5); }) { IsBackground = true }).ToList();
+        threads.ForEach(th => th.Start());
+        try {
+            for (int s = 0; s < 270; s++) {
+                if (s == 180) Volatile.Write(ref stop, true);
+                Thread.Sleep(1000);
+                double tc = t.Tctl();
+                L($"  auto s={s,3} load={(s < 180 ? 1 : 0)} " + Line(ec, t));
+                if (tc > 99) { Volatile.Write(ref stop, true); L("load stopped: tctl > 99"); }
+            }
+        } finally { Volatile.Write(ref stop, true); }
+        L("== auto end dump"); L(Hex(DumpEc(ec)));
+        return 0;
+    }
+}
