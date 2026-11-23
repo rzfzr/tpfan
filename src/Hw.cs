@@ -51,25 +51,33 @@ sealed class Ec : IDisposable {
     void WaitIbfClear() => Wait(2, false, "IBF");
     void WaitObfSet() => Wait(1, true, "OBF");
 
+    // Windows' own ACPI EC driver uses these same ports and nothing here can lock against it
+    // (Global\Access_EC only covers other user-mode tools). When two transactions interleave, the EC
+    // pairs our bytes with Windows' ones: a read returns a byte meant for Windows, and a write can
+    // land on another register. On 2026-11-20..23 that happened at wake-up and switched off the
+    // TrackPoint. So: never take an output byte we did not ask for, never retry in a loop, and let
+    // the caller double-check a value before acting on it.
     T Locked<T>(Func<T> f) {
         bool got = false;
         try {
             try { got = _mutex.WaitOne(500); } catch (AbandonedMutexException) { got = true; }
-            for (int attempt = 0; ; attempt++) {
-                try { return f(); }
-                catch (TimeoutException) when (attempt < 5) {
-                    if ((In(Cmd) & 1) != 0) In(Data);   // drain a stale output byte left by a broken transaction
-                    Thread.Sleep(10);
-                }
-            }
+            return f();
         } finally { if (got) _mutex.ReleaseMutex(); }
     }
+    // A pending output byte is someone else's answer: wait for its owner to collect it.
+    void WaitIdle() { Wait(1, false, "busy (OBF)"); WaitIbfClear(); }
     public byte Read(byte addr) => Locked(() => {
-        WaitIbfClear(); Out(Cmd, 0x80); WaitIbfClear(); Out(Data, addr); WaitObfSet(); return In(Data);
+        WaitIdle(); Out(Cmd, 0x80); WaitIbfClear(); Out(Data, addr); WaitObfSet(); return In(Data);
     });
     public void Write(byte addr, byte v) => Locked(() => {
-        WaitIbfClear(); Out(Cmd, 0x81); WaitIbfClear(); Out(Data, addr); WaitIbfClear(); Out(Data, v); WaitIbfClear(); return 0;
+        WaitIdle(); Out(Cmd, 0x81); WaitIbfClear(); Out(Data, addr); WaitIbfClear(); Out(Data, v); WaitIbfClear(); return 0;
     });
+    /// Two reads that must agree; a collision shows up as a mismatch and throws instead of returning junk.
+    public byte ReadStable(byte addr) {
+        byte a = Read(addr); Thread.Sleep(5); byte b = Read(addr);
+        if (a != b) throw new TimeoutException($"EC 0x{addr:X2} unstable (0x{a:X2}/0x{b:X2})");
+        return a;
+    }
     public void Dispose() { _m.Dispose(); _mutex.Dispose(); }
 }
 
@@ -89,4 +97,35 @@ sealed class AmdTemp : IDisposable {
 static class Tp {
     public const byte FanCtl = 0x2F;   // bits0-2 level, 0x40 disengaged (max), 0x80 BIOS auto
     public static int Rpm(Ec ec) => ec.Read(0x84) | (ec.Read(0x85) << 8);
+}
+
+/// Display on/off and suspend/resume notifications (also fire for Modern Standby, which never stops the service).
+/// The EC is busiest right after wake-up, which is when collisions with Windows' EC driver happened.
+static class PowerWatch {
+    delegate uint Callback(IntPtr context, uint type, IntPtr setting);
+    [StructLayout(LayoutKind.Sequential)] struct Subscribe { public IntPtr Cb; public IntPtr Ctx; }
+    [DllImport("powrprof.dll")] static extern uint PowerSettingRegisterNotification(ref Guid setting, uint flags, IntPtr recipient, out IntPtr handle);
+    [DllImport("powrprof.dll")] static extern uint PowerRegisterSuspendResumeNotification(uint flags, IntPtr recipient, out IntPtr handle);
+    const uint DeviceNotifyCallback = 2, PbtSuspend = 4, PbtResumeSuspend = 7, PbtResumeAutomatic = 0x12, PbtSetting = 0x8013;
+    static Guid ConsoleDisplayState = new Guid("6FE69556-704A-47A0-8F24-C28D936FDA47");
+    static Callback _keep;   // must outlive the registration
+
+    /// onEvent(true) = display off / suspending; onEvent(false) = display on / resumed.
+    public static void Start(Action<bool, string> onEvent) {
+        _keep = (ctx, type, setting) => {
+            try {
+                if (type == PbtSuspend) onEvent(true, "suspend");
+                else if (type == PbtResumeSuspend || type == PbtResumeAutomatic) onEvent(false, "resume");
+                else if (type == PbtSetting && setting != IntPtr.Zero) {
+                    int state = Marshal.ReadInt32(setting, 20);   // POWERBROADCAST_SETTING: Guid(16) + DataLength(4) + Data
+                    if (state == 0) onEvent(true, "display off"); else if (state == 1) onEvent(false, "display on");
+                }
+            } catch { }
+            return 0;
+        };
+        var sub = Marshal.AllocHGlobal(Marshal.SizeOf<Subscribe>());   // never freed: lives as long as the process
+        Marshal.StructureToPtr(new Subscribe { Cb = Marshal.GetFunctionPointerForDelegate(_keep) }, sub, false);
+        PowerSettingRegisterNotification(ref ConsoleDisplayState, DeviceNotifyCallback, sub, out _);
+        PowerRegisterSuspendResumeNotification(DeviceNotifyCallback, sub, out _);
+    }
 }

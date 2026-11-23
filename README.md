@@ -28,12 +28,29 @@ register below `0x100` exposes the auto targets, so they can't be set directly.
   to BIOS auto after 25 s below 78 °C.
 - **Emergency:** raw Tctl ≥ 95 °C for 5 s jumps to the top step.
 - **Full speed (6300 rpm) is not used** by the default config: it's far above anything the BIOS does.
-- **Fail-safe:** service stop or shutdown, an implausible Tctl, or 10 EC errors in a row put the fan back in
-  BIOS auto. A crash exits non-zero and the service restarts.
+- **Fail-safe:** service stop or shutdown and an implausible Tctl put the fan back in BIOS auto; display off
+  and suspend do too (see below). A crash exits non-zero and the service restarts.
 
 Tctl is read directly from the CPU (SMN `0x59800`), not the EC's slower copy. EC access goes through
 [PawnIO](https://pawnio.eu) with the signed modules in [src/modules](src/modules), and shares the
 `Global\Access_EC` mutex with HWiNFO and LibreHardwareMonitor.
+
+### EC safety
+
+Windows reads EC RAM through memory here (`ECOR` is SystemMemory `0xFE00DA00`), but it still uses ports
+`0x62/0x66` for EC events: on an SCI it sends query `0x84` and reads the event number. Nothing in user mode can
+lock against that, so a tpfan transaction can interleave with it. The first version wrote `0x2F` back whenever
+one read disagreed, and drained "stale" output bytes; at wake-up the EC raises many events, so tpfan read
+event numbers (`0x24`, `0x3F`, `0x87`, `0x96`: all real `_Qxx` handlers) as fan values and rewrote the register
+in bursts. Windows lost or misread those events, and on 2026-11-20..23 the TrackPoint stopped working after
+wake-ups (data reporting left disabled; restarting `EPDCtrl.exe` re-enables it). Now:
+
+- it writes `0x2F` only on a step change; `0x2F` and RPM are read every `VerifySec` (5 s), not every poll;
+- a read is done twice and must agree, an output byte it didn't ask for is never taken, errors back off 5 s
+  instead of retrying;
+- a different `0x2F` is corrected only when the same value is seen on 3 checks in a row, at most once a minute;
+- display off / suspend hands the fan to BIOS auto and stops EC access; display on / resume (and any >5 s
+  gap in the loop) waits `QuietSec` (30 s) before touching the EC again.
 
 If the CPU still sits at its limit under load, check the CPU tuning, not the fan. For example, Universal x86
 Tuning Utility's `--tctl-temp=97` tells the CPU to boost until 97 °C, so extra cooling only becomes extra
@@ -84,6 +101,8 @@ Elevated, with the service stopped (`Stop-Service tpfan`):
   "DownHoldSec": 25,   // cooler than the step's Down for 25 s before stepping down
   "EmergencyTemp": 95, // raw Tctl for EmergencySec -> top step (capped at 97 in code)
   "EmergencySec": 5,
+  "VerifySec": 5,      // how often 0x2F and RPM are read back (default)
+  "QuietSec": 30,      // no EC access this long after display on / resume (default)
   "Steps": [           // Up must increase, Down < Up; Ec is the hex value for 0x2F
     { "Ec": "80", "Up": 0,  "Down": 0,  "Note": "BIOS auto" },
     { "Ec": "7",  "Up": 85, "Down": 78, "Note": "4200 rpm" }
