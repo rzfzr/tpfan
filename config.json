@@ -10,9 +10,27 @@
   "DownHoldSec": 25,     // must be cooler than Down for 25 s before stepping down
   "EmergencyTemp": 95,   // raw Tctl >= 95 for 5 s -> top step (capped at 97 in code)
   "EmergencySec": 5,
-  // Top step is 4200 rpm on purpose: full speed (40) is never used.
+  // Top step is 4200 rpm on purpose: full speed (40) is never used. The mode's FanUp/FanDown replace its Up/Down.
   "Steps": [
     { "Ec": "80", "Up": 0,  "Down": 0,  "Note": "BIOS auto" },
     { "Ec": "7",  "Up": 85, "Down": 78, "Note": "4200 rpm" }
+  ],
+
+  // CPU modes, replacing Universal x86 Tuning Utility's presets. tpfan-bar cycles "Mode" when its letter is clicked.
+  // SMU limits (W, A, °C, s) are sent at start, on a mode change, after wake and cable changes, and every ReapplySec.
+  // PowerMode: best-performance | balanced | best-efficiency. MaxFreqMHz: plugged-in cap of the active plan, 0 = none
+  // (best-efficiency has its own cap, 3500 MHz). Boost: max-performance | power-saving.
+  "ReapplySec": 30,
+  "Mode": "Performance",
+  "Modes": [
+    { "Name": "Eco", "TctlTemp": 85, "StapmLimit": 14, "FastLimit": 22, "SlowLimit": 16, "StapmTime": 8, "SlowTime": 30,
+      "VrmCurrent": 28, "VrmMaxCurrent": 62, "VrmSocCurrent": 64, "VrmSocMaxCurrent": 70, "Boost": "power-saving",
+      "PowerMode": "best-efficiency", "MaxFreqMHz": 4000, "FanUp": 90, "FanDown": 82 },
+    { "Name": "Performance", "TctlTemp": 97, "StapmLimit": 24, "FastLimit": 45, "SlowLimit": 28, "StapmTime": 20, "SlowTime": 45,
+      "VrmCurrent": 28, "VrmMaxCurrent": 62, "VrmSocCurrent": 64, "VrmSocMaxCurrent": 70, "Boost": "max-performance",
+      "PowerMode": "best-performance", "MaxFreqMHz": 4000, "FanUp": 90, "FanDown": 82 },
+    { "Name": "Maximum", "TctlTemp": 99, "StapmLimit": 35, "FastLimit": 50, "SlowLimit": 35, "StapmTime": 20, "SlowTime": 45,
+      "VrmCurrent": 40, "VrmMaxCurrent": 70, "VrmSocCurrent": 64, "VrmSocMaxCurrent": 70, "Boost": "max-performance",
+      "PowerMode": "best-performance", "MaxFreqMHz": 0, "FanUp": 78, "FanDown": 70 }
   ]
 }

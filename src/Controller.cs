@@ -24,16 +24,31 @@ sealed class Config {
     public double VerifySec { get; set; } = 5;       // how often 0x2F is read back (every EC access risks a collision)
     public double QuietSec { get; set; } = 30;       // no EC access this long after display on / resume
     public List<Step> Steps { get; set; } = new List<Step>();
+    public string Mode { get; set; }                 // the CPU mode in force (tpfan-bar switches it)
+    public List<CpuMode> Modes { get; set; } = new List<CpuMode>();
+    public double ReapplySec { get; set; } = 30;     // SMU limits are reset by the firmware, so send them again
+
+    public CpuMode CurrentMode => Modes.Find(m => string.Equals(m.Name, Mode, StringComparison.OrdinalIgnoreCase));
+
+    /// The steps with the current mode's FanUp/FanDown on the top step.
+    public List<Step> EffectiveSteps() {
+        var steps = Steps.ConvertAll(s => new Step { Ec = s.Ec, Up = s.Up, Down = s.Down, Note = s.Note });
+        if (CurrentMode?.FanUp is double up) { steps[^1].Up = up; steps[^1].Down = CurrentMode.FanDown.Value; }
+        return steps;
+    }
 
     public static Config Load(string path) {
         var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true, ReadCommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
         var c = JsonSerializer.Deserialize<Config>(File.ReadAllText(path), opts);
         if (c.Steps.Count < 2) throw new InvalidDataException("need at least 2 steps");
         foreach (var s in c.Steps) _ = s.Value;
-        for (int i = 1; i < c.Steps.Count; i++)
-            if (c.Steps[i].Up <= c.Steps[i - 1].Up || c.Steps[i].Down >= c.Steps[i].Up)
+        foreach (var m in c.Modes) m.Validate();
+        if (c.Modes.Count > 0 && c.CurrentMode == null) throw new InvalidDataException($"Mode \"{c.Mode}\" is not one of the Modes");
+        var steps = c.EffectiveSteps();
+        for (int i = 1; i < steps.Count; i++)
+            if (steps[i].Up <= steps[i - 1].Up || steps[i].Down >= steps[i].Up)
                 throw new InvalidDataException($"step {i}: Up must increase and Down must be below Up");
-        if (c.PollMs < 100 || c.SmoothSec <= 0) throw new InvalidDataException("PollMs >= 100 and SmoothSec > 0");
+        if (c.PollMs < 100 || c.SmoothSec <= 0 || c.ReapplySec < 5) throw new InvalidDataException("PollMs >= 100, SmoothSec > 0, ReapplySec >= 5");
         return c;
     }
 }
@@ -59,7 +74,45 @@ sealed class Controller {
     void Quiet(double secs) => Interlocked.Exchange(ref _quietUntil, Math.Max(Interlocked.Read(ref _quietUntil), DateTime.UtcNow.AddSeconds(secs).Ticks));
     void OnPower(bool off, string what) {
         if (off) { if (!_off) Log($"{what}: fan to BIOS auto, EC paused"); _off = true; _handback = true; }
-        else { if (_off) Log($"{what}: EC resumes in {_cfg.QuietSec:F0} s"); _off = false; Quiet(_cfg.QuietSec); }
+        else { if (_off) Log($"{what}: EC resumes in {_cfg.QuietSec:F0} s"); _off = false; Quiet(_cfg.QuietSec); Kick(3); }
+    }
+
+    // CPU mode (SMU limits + Windows settings). The firmware resets the SMU limits on wake, on a power-cable change
+    // and when Lenovo's thermal service decides to, so they are sent again soon after those and every ReapplySec.
+    Smu _smu;
+    string _modeKey, _modeApplied, _smuError;
+    List<Step> _steps;
+    long _smuDue;                         // UTC ticks; send the SMU limits again at this time
+    void Kick(double secs) {
+        long t = DateTime.UtcNow.AddSeconds(secs).Ticks;
+        long cur; do { cur = Interlocked.Read(ref _smuDue); if (cur <= t) return; } while (Interlocked.CompareExchange(ref _smuDue, t, cur) != cur);
+    }
+
+    void ApplyMode(DateTime now) {
+        var mode = _cfg.CurrentMode;
+        if (mode == null) { _modeApplied = null; return; }
+        string key = JsonSerializer.Serialize(mode);
+        bool changed = key != _modeKey;
+        if (!changed && now.Ticks < Interlocked.Read(ref _smuDue)) return;
+        Interlocked.Exchange(ref _smuDue, now.AddSeconds(_cfg.ReapplySec).Ticks);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        long winMs = 0;
+        if (changed) {
+            _modeKey = key;
+            try { WinPower.Apply(mode); } catch (Exception e) { Log($"mode {mode.Name}: Windows settings failed: {e.Message}"); }
+            winMs = sw.ElapsedMilliseconds;
+        }
+        string err = _smu == null ? "SMU not available" : null;
+        if (_smu != null)
+            foreach (var (msg, val, name) in mode.SmuMessages()) {
+                try { uint r = _smu.Send(msg, val); if (r != Smu.Ok) err = $"{name} answer 0x{r:X2}"; }
+                catch (Exception e) when (e is TimeoutException || e is IOException) { err = $"{name}: {e.Message}"; }
+            }
+        long smuMs = sw.ElapsedMilliseconds - winMs;
+        if (changed || err != _smuError || smuMs > 1000)
+            Log((err == null ? $"mode {mode.Name} applied" : $"mode {mode.Name}: {err}") + $" (Windows {winMs} ms, SMU {smuMs} ms)");
+        _smuError = err;
+        _modeApplied = mode.Name;
     }
 
     public Controller(string cfgPath, string dir) { _cfgPath = cfgPath; _dir = dir; Directory.CreateDirectory(dir); }
@@ -77,17 +130,19 @@ sealed class Controller {
         var t = File.GetLastWriteTimeUtc(_cfgPath);
         if (t == _cfgTime) return;
         _cfgTime = t;
-        try { _cfg = Config.Load(_cfgPath); Log($"config loaded: {_cfg.Steps.Count} steps"); }
+        try { _cfg = Config.Load(_cfgPath); Log($"config loaded: {_cfg.Steps.Count} steps, mode {_cfg.CurrentMode?.Name ?? "none"}"); }
         catch (Exception e) { Log("config error, keeping previous: " + e.Message); if (_cfg == null) throw; }
-        if (_idx >= _cfg.Steps.Count) _idx = _cfg.Steps.Count - 1;
+        _steps = _cfg.EffectiveSteps();
+        if (_idx >= _steps.Count) _idx = _steps.Count - 1;
     }
 
     public void Run() {
         using var ec = new Ec();
         using var amd = new AmdTemp();
+        try { _smu = new Smu(); } catch (Exception e) { Log("SMU not available, modes only set Windows and the fan: " + e.Message); }
         ReloadIfChanged();
         Log("start");
-        PowerWatch.Start(OnPower);
+        PowerWatch.Start(OnPower, () => Kick(2));
         int errors = 0;
         try {
             while (!_stop) {
@@ -102,6 +157,7 @@ sealed class Controller {
             }
         } finally {
             try { ec.Write(Tp.FanCtl, 0x80); } catch { }
+            _smu?.Dispose();
             Log("stop: fan handed back to BIOS (0x80)");
         }
     }
@@ -111,9 +167,10 @@ sealed class Controller {
         var now = DateTime.UtcNow;
         double dt = (now - _last).TotalSeconds; _last = now;
         ReloadIfChanged();
-        var steps = _cfg.Steps;
+        var steps = _steps;
 
-        if (dt >= 5) { Quiet(_cfg.QuietSec); Log($"{dt:F0} s gap (sleep?): EC resumes in {_cfg.QuietSec:F0} s"); }
+        if (dt >= 5) { Quiet(_cfg.QuietSec); Kick(3); Log($"{dt:F0} s gap (sleep?): EC resumes in {_cfg.QuietSec:F0} s"); }
+        ApplyMode(now);   // SMU and Windows only, no EC: also while the EC is paused
         if (_off) {
             if (_handback) {
                 _handback = false;
@@ -180,6 +237,7 @@ sealed class Controller {
     void Status(DateTime now, double t, string s) {
         if ((now - _lastStatus).TotalSeconds < 1) return;
         _lastStatus = now;
-        try { File.WriteAllText(Path.Combine(_dir, "status.txt"), $"{DateTime.Now:HH:mm:ss} tctl={t:F1} avg={_ema:F1} {s}\n"); } catch { }
+        string mode = _modeApplied == null ? "" : $" mode={_modeApplied}" + (_smuError != null ? " smu=error" : "");
+        try { File.WriteAllText(Path.Combine(_dir, "status.txt"), $"{DateTime.Now:HH:mm:ss} tctl={t:F1} avg={_ema:F1} {s}{mode}\n"); } catch { }
     }
 }

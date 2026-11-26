@@ -108,17 +108,20 @@ static class PowerWatch {
     [DllImport("powrprof.dll")] static extern uint PowerRegisterSuspendResumeNotification(uint flags, IntPtr recipient, out IntPtr handle);
     const uint DeviceNotifyCallback = 2, PbtSuspend = 4, PbtResumeSuspend = 7, PbtResumeAutomatic = 0x12, PbtSetting = 0x8013;
     static Guid ConsoleDisplayState = new Guid("6FE69556-704A-47A0-8F24-C28D936FDA47");
+    static Guid AcDcPowerSource = new Guid("5D3E9A59-E9D5-4B00-A6BD-FF34FF516548");
     static Callback _keep;   // must outlive the registration
 
-    /// onEvent(true) = display off / suspending; onEvent(false) = display on / resumed.
-    public static void Start(Action<bool, string> onEvent) {
+    /// onEvent(true) = display off / suspending; onEvent(false) = display on / resumed. onAcChange: cable in or out.
+    public static void Start(Action<bool, string> onEvent, Action onAcChange) {
         _keep = (ctx, type, setting) => {
             try {
                 if (type == PbtSuspend) onEvent(true, "suspend");
                 else if (type == PbtResumeSuspend || type == PbtResumeAutomatic) onEvent(false, "resume");
                 else if (type == PbtSetting && setting != IntPtr.Zero) {
-                    int state = Marshal.ReadInt32(setting, 20);   // POWERBROADCAST_SETTING: Guid(16) + DataLength(4) + Data
-                    if (state == 0) onEvent(true, "display off"); else if (state == 1) onEvent(false, "display on");
+                    var which = Marshal.PtrToStructure<Guid>(setting);   // POWERBROADCAST_SETTING: Guid(16) + DataLength(4) + Data
+                    int state = Marshal.ReadInt32(setting, 20);
+                    if (which == AcDcPowerSource) onAcChange();
+                    else if (state == 0) onEvent(true, "display off"); else if (state == 1) onEvent(false, "display on");
                 }
             } catch { }
             return 0;
@@ -126,6 +129,7 @@ static class PowerWatch {
         var sub = Marshal.AllocHGlobal(Marshal.SizeOf<Subscribe>());   // never freed: lives as long as the process
         Marshal.StructureToPtr(new Subscribe { Cb = Marshal.GetFunctionPointerForDelegate(_keep) }, sub, false);
         PowerSettingRegisterNotification(ref ConsoleDisplayState, DeviceNotifyCallback, sub, out _);
+        PowerSettingRegisterNotification(ref AcDcPowerSource, DeviceNotifyCallback, sub, out _);
         PowerRegisterSuspendResumeNotification(DeviceNotifyCallback, sub, out _);
     }
 }

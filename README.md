@@ -95,6 +95,33 @@ Elevated, with the service stopped (`Stop-Service tpfan`):
 `status.txt` is rewritten every second. Tctl comes from the CPU, so it is reported even while EC access is
 paused (display off, after wake, after an EC error); only the fan part then says `paused (...)`.
 
+## CPU modes
+
+tpfan also applies CPU modes (replacing Universal x86 Tuning Utility on this laptop): `Modes` in the config, each
+with power and temperature limits for the CPU's power-management firmware (SMU), the Windows power mode, the
+plugged-in frequency cap and the fan's top-step thresholds. `"Mode"` picks one; tpfan-bar's mode letter
+cycles it, and so does editing the config. The values for this laptop (Eco, Performance, Maximum) and how they
+were measured are in the dotfiles repo, `workspaces/e14g5/cpu-tuning/README.md`.
+
+- The SMU limits go through PawnIO's signed **RyzenSMU** module (from UXTU's install; see `src/modules`). They
+  are MP1 mailbox messages (`0x3B10528` / `0x3B10564` / `0x3B10998`, ids from RyzenAdj for Cezanne: STAPM 0x14,
+  fast 0x15, slow 0x16, slow time 0x17, STAPM time 0x18, Tctl 0x19, TDC/EDC 0x1A–0x1D, max performance 0x11,
+  power saving 0x12). The module's own `send_smu_command` uses the other (PSMU) mailbox on this CPU, so tpfan
+  writes the MP1 registers itself with `read/write_smu_register`, under the `Global\Access_PCI` mutex.
+- They are sent at start, on a mode change, 2–3 s after wake, display-on and cable changes, and every
+  `ReapplySec` (30 s): the firmware and Lenovo's thermal service reset them. That takes 13–27 ms.
+- The Windows power mode (overlay) and the active plan's `PROCFREQMAX` are set only on a mode change.
+- `status.txt` ends with ` mode=<name>` (and ` smu=error` if a message was refused; the log says which).
+
+Only for Cezanne / Barcelo (Ryzen 5000U / 7030U): other CPUs use other mailboxes and message ids. With no
+`Modes` in the config tpfan never talks to the SMU.
+
+| Elevated, service running or not | |
+|---|---|
+| `tpfan smu` | limits in force, from the PM table (version 0x400005 offsets) |
+| `tpfan smu-raw` | the PM table's limit section, raw, for comparing two tools |
+| `tpfan smu-set <hex id> <value>` | send one MP1 message, then print the limits |
+
 ## Config
 
 ```jsonc

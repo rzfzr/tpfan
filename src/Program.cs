@@ -29,6 +29,31 @@ static class Program {
                 case "monitor": return Monitor(a.Length > 1 ? int.Parse(a[1]) : 10);
                 case "set": return Set(a[1]);
                 case "probe": return Probe(a.Length > 1 ? a[1] : "probe.log");
+                case "smu": {   // limits in force, from the PM table
+                    using var smu = new Smu();
+                    var t = smu.Table(out ulong ver);
+                    Console.WriteLine($"code name {smu.CodeName}, PM table 0x{ver:X}");
+                    Console.WriteLine(Smu.Describe(t, ver));
+                    return 0;
+                }
+                case "smu-raw": {   // the limit section of the PM table, for comparing what two tools set
+                    using var smu = new Smu();
+                    var t = smu.Table(out ulong ver);
+                    Console.WriteLine($"PM table 0x{ver:X}");
+                    foreach (int off in Enumerable.Range(0, 0x70 / 4).Select(i => i * 4).Concat(Enumerable.Range(0x900 / 4, 12).Select(i => i * 4)))
+                        Console.Write($"{off:X3}={t[off / 4]:0.##} ");
+                    Console.WriteLine();
+                    return 0;
+                }
+                case "smu-set": {   // smu-set <message hex> <value>: one MP1 message, then the limits in force
+                    using var smu = new Smu();
+                    uint msg = Convert.ToUInt32(a[1], 16), val = uint.Parse(a[2]);
+                    Console.WriteLine($"0x{msg:X2} {val} -> answer 0x{smu.Send(msg, val):X2}");
+                    Thread.Sleep(300);
+                    var t = smu.Table(out ulong ver);
+                    Console.WriteLine(Smu.Describe(t, ver));
+                    return 0;
+                }
                 default:
                     Console.Error.WriteLine("usage: tpfan status | run [config] | check [config] | dump | monitor [s] | set <hex|auto> | probe [log]");
                     return 2;
