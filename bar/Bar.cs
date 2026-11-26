@@ -18,7 +18,7 @@ sealed unsafe class Bar {
     const string HostClass = "tpfanBarHost", StripClass = "tpfanBarStrip";
     const uint TimerLayout = 1, TimerData = 2;
 
-    enum Kind { Mode, Cpu, Disk, Net, Ram, Power, Temp, Battery, Fan }
+    enum Kind { Mode, Cpu, Disk, Net, Ram, Power, Temp, Battery }   // Temp = temperature + fan, Battery = charge + rate
     /// Gap = space to the next item. Mode items are one per mode (a 3-way switch); Mode holds its name.
     sealed class Item { public Kind Kind; public int X, W, Gap; public string Mode, Tip = ""; }
     string _modeNames = "";   // the modes the switch was laid out for
@@ -177,9 +177,8 @@ sealed unsafe class Bar {
             (Kind.Net, S(5) + S(3) + NetNum + S(2) + NetUnitW),
             (Kind.Ram, Dia),
             (Kind.Power, NumBox("8.8") + unitGap + small),
-            (Kind.Temp, NumBox("100") + unitGap + S(PixelFont.Small.Width("o"))),
+            (Kind.Temp, TempW + S(8) + NumBox("8888") + unitGap + S(PixelFont.Small.Width("rpm"))),   // temperature + fan
             (Kind.Battery, NumBox("100") + unitGap + S(PixelFont.Small.Width("%")) + S(5) + ArrowW),   // charge + rate arrow
-            (Kind.Fan, NumBox("8888") + unitGap + S(PixelFont.Small.Width("rpm"))),
         };
         _items.Clear();
         int x = S(6);
@@ -271,8 +270,12 @@ sealed unsafe class Bar {
                 }
                 case Kind.Power: Number(x, NumBox("8.8"), double.IsNaN(_s.CpuW) ? "--" : Num(_s.CpuW), "W", Palette.Cpu(l)); break;
                 case Kind.Temp:
+                    // temperature, then fan speed, as one item (one hover area and tooltip)
                     Number(x, NumBox("100"), double.IsNaN(_s.Tctl) ? "--" : Math.Round(_s.Tctl).ToString("0", Inv), "o",
                            double.IsNaN(_s.Tctl) ? Palette.Grey(l) : _s.Tctl >= 95 ? Palette.Red(l) : _s.Tctl >= 85 ? Palette.Yellow(l) : Palette.Text(l));
+                    // fan: white = BIOS curve, yellow = tpfan holds the 4200 rpm step, grey = tpfan paused (last reading)
+                    Number(x + TempW + S(8), NumBox("8888"), _s.Rpm < 0 ? "--" : _s.Rpm.ToString(Inv), "rpm",
+                           _s.Rpm < 0 || _s.FanPaused ? Palette.Grey(l) : _s.FanForced ? Palette.Yellow(l) : Palette.Text(l));
                     break;
                 case Kind.Battery: {
                     // charge, then the rate arrow, as one item (one hover area and tooltip)
@@ -282,11 +285,6 @@ sealed unsafe class Bar {
                     RateArrow(x + it.W - ArrowW);
                     break;
                 }
-                case Kind.Fan:
-                    // white: BIOS curve; yellow: tpfan holds the 4200 rpm step; grey: tpfan paused (last reading)
-                    Number(x, NumBox("8888"), _s.Rpm < 0 ? "--" : _s.Rpm.ToString(Inv), "rpm",
-                           _s.Rpm < 0 || _s.FanPaused ? Palette.Grey(l) : _s.FanForced ? Palette.Yellow(l) : Palette.Text(l));
-                    break;
             }
         }
         Present();
@@ -302,6 +300,7 @@ sealed unsafe class Bar {
     }
 
     int ArrowW => 2 * S(3) + 1;   // odd, so the arrow has a centre column
+    int TempW => NumBox("100") + S(2) + S(PixelFont.Small.Width("o"));   // the temperature part of the Temp item
 
     /// Battery rate: up (green) while charging, down while discharging (amber, red from 25 W); its length is the
     /// watts, full height at 45 W charging / 35 W discharging; a grey dash when plugged in and idle.
@@ -355,7 +354,7 @@ sealed unsafe class Bar {
             if (mode != null && mode != _modes.Requested && _modes.Request(mode)) { Tooltips(); Draw(); }
         } else if (_items[i].Kind is Kind.Cpu or Kind.Disk or Kind.Net or Kind.Ram) {
             ShellExecute(IntPtr.Zero, "open", "taskmgr.exe", null, null, 1);
-        } else if (_items[i].Kind == Kind.Fan) {
+        } else if (_items[i].Kind == Kind.Temp) {
             ShellExecute(IntPtr.Zero, "open", Path.Combine(Sensors.TpfanDir, "tpfan.log"), null, null, 1);
         }
     }
@@ -417,12 +416,12 @@ sealed unsafe class Bar {
             case Kind.Net: return $"Network{(_s.NetNames.Length > 0 ? $" ({_s.NetNames})" : "")}\nSend {NetLong(_s.SendBps)}\nReceive {NetLong(_s.RecvBps)}";
             case Kind.Ram: return $"Memory {Pct(_s.RamPercent)} in use\n{Gb(_s.RamUsed)} of {Gb(_s.RamTotal)} GB\nCommitted {Gb(_s.CommitUsed)} of {Gb(_s.CommitLimit)} GB";
             case Kind.Power: return (double.IsNaN(_s.CpuW) ? "CPU power n/a" : $"CPU package power {_s.CpuW.ToString("0.0", Inv)} W") + "\n" + _s.Fan;
-            case Kind.Temp: return (double.IsNaN(_s.Tctl) ? "CPU temperature n/a" : $"CPU temperature (Tctl) {_s.Tctl.ToString("0.0", Inv)} °C") + "\n" + _s.Fan;
-            case Kind.Battery: return BatteryTip();
-            case Kind.Fan:
-                return _s.Fan + (_s.FanPaused && _s.Rpm >= 0 ? $"\nLast reading {_s.Rpm} rpm" : "")
+            case Kind.Temp:
+                return (double.IsNaN(_s.Tctl) ? "CPU temperature n/a" : $"CPU temperature (Tctl) {_s.Tctl.ToString("0.0", Inv)} °C")
+                       + "\n" + _s.Fan + (_s.FanPaused && _s.Rpm >= 0 ? $", last reading {_s.Rpm} rpm" : "")
                        + (_s.FanForced && !_s.FanPaused ? "\ntpfan holds the 4200 rpm step" : _s.Rpm >= 0 && !_s.FanPaused ? "\nBIOS fan curve" : "")
                        + "\nClick: tpfan log";
+            case Kind.Battery: return BatteryTip();
         }
         return "";
     }
