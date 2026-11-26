@@ -136,7 +136,7 @@ Left to right:
 | RAM | blue pie: memory in use | `GlobalMemoryStatusEx` |
 | CPU power, W | blue | Windows' RAPL performance counter `\Energy Meter(RAPL_Package0_PKG)\Power` |
 | CPU temperature and fan | Tctl in ° (white, yellow from 85, red from 95), then the fan in rpm (white on the BIOS curve, yellow while tpfan holds the 4200 rpm step, grey while tpfan is paused: last reading). One tooltip. **Click: tpfan log** | tpfan's `status.txt`: `tctl=`, `rpm=` (read every 5 s) and `step=`; `--` when tpfan isn't running |
-| Battery | the charge in % (white, amber at 30 % and red at 15 % on battery), then an arrow for the rate: up and green while charging, down while discharging (amber, red from 25 W), its length the watts (full height at 45 W charging, 35 W discharging); a grey dash when plugged in and not charging. One tooltip: charge, exact watts, time to full or empty | `GetSystemPowerStatus`, `CallNtPowerInformation(SystemBatteryState)` |
+| Battery | the charge in % (white, amber at 30 % and red at 15 % on battery), then a full-height arrow for the rate: up while charging, down while discharging, its colour the watts (discharging: yellow, orange at 18 W, red from 35 W; charging: green to cyan at 45 W); a grey dash when plugged in and not charging. One tooltip: charge, exact watts, time to full or empty | `GetSystemPowerStatus`, `CallNtPowerInformation(SystemBatteryState)` |
 
 Hover an item for the exact values (per-core loads, disk read/write speed, adapter names, memory and commit in GB,
 fan speed and step, time to full or empty). Click a meter for Task Manager, the temperature and fan for the tpfan log; right-click for Task Manager, the

@@ -7,6 +7,18 @@ readonly struct Rgba {
     public Rgba(byte a, int rgb) { A = a; R = (byte)(rgb >> 16); G = (byte)(rgb >> 8); B = (byte)rgb; }
     public static Rgba Of(int rgb) => new Rgba(255, rgb);
     public Rgba WithAlpha(byte a) => new Rgba(a, (R << 16) | (G << 8) | B);
+
+    /// A colour along a scale: stops are (value, rgb), sorted by value; outside them the end colours.
+    public static Rgba Scale(double v, params (double At, int Rgb)[] stops) {
+        if (double.IsNaN(v) || v <= stops[0].At) return Of(stops[0].Rgb);
+        for (int i = 1; i < stops.Length; i++) {
+            if (v > stops[i].At) continue;
+            double t = (v - stops[i - 1].At) / (stops[i].At - stops[i - 1].At);
+            int Mix(int sh) => (int)Math.Round(((stops[i - 1].Rgb >> sh) & 0xFF) * (1 - t) + ((stops[i].Rgb >> sh) & 0xFF) * t);
+            return Of((Mix(16) << 16) | (Mix(8) << 8) | Mix(0));
+        }
+        return Of(stops[^1].Rgb);
+    }
 }
 
 /// Taskbar colours, dark taskbar first, light second.

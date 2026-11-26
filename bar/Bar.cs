@@ -302,21 +302,20 @@ sealed unsafe class Bar {
     int ArrowW => 2 * S(3) + 1;   // odd, so the arrow has a centre column
     int TempW => NumBox("100") + S(2) + S(PixelFont.Small.Width("o"));   // the temperature part of the Temp item
 
-    /// Battery rate: up (green) while charging, down while discharging (amber, red from 25 W); its length is the
-    /// watts, full height at 45 W charging / 35 W discharging; a grey dash when plugged in and idle.
+    /// Battery rate: a full-height arrow, up while charging, down while discharging; its colour is the watts.
+    /// Discharging runs warm: yellow (light use) -> orange (18 W) -> red (35 W and more). Charging runs green -> cyan
+    /// (45 W). A grey dash when plugged in and idle.
     void RateArrow(int x) {
         var c = _canvas; bool l = _light;
         double w = Math.Abs(_s.RateW);
-        int aw = ArrowW, ah = Math.Min(S(18), _h - S(6)), ay = (_h - ah) / 2;
+        int aw = ArrowW, ah = Math.Min(S(20), _h - S(4)), ay = (_h - ah) / 2;
         if (_s.Percent < 0) return;
         bool idle = double.IsNaN(w) || w < 0.05 || (!_s.Charging && !_s.Discharging);
         if (idle) { c.Fill(x, ay + ah / 2 - _scale / 2, aw, _scale, Palette.Grey(l)); return; }
-        int sh = Math.Max(1, aw / 6);
-        c.Fill(x + aw / 2 - sh, ay, 2 * sh + 1, ah, Palette.Track(l));   // full-scale track behind the arrow
-        double full = _s.Charging ? 45 : 35;
-        int len = Math.Max(S(5), (int)Math.Round(Math.Min(w / full, 1) * ah));
-        var color = _s.Charging ? Palette.Green(l) : w >= 25 ? Palette.Red(l) : Palette.Amber(l);
-        c.Arrow(x, ay, aw, ah, _s.Charging, len, color);
+        var color = _s.Charging
+            ? (l ? Rgba.Scale(w, (5, 0x107C10), (45, 0x006E8C)) : Rgba.Scale(w, (5, 0x74E27E), (45, 0x4FD8FF)))
+            : (l ? Rgba.Scale(w, (5, 0x8A6A00), (18, 0xB35C00), (35, 0xC42B1C)) : Rgba.Scale(w, (5, 0xFFE066), (18, 0xFF9A3C), (35, 0xFF4A3D)));
+        c.Arrow(x, ay, aw, ah, _s.Charging, ah, color);
     }
 
     /// A big number right-aligned in its box, then a small unit on the same baseline.
