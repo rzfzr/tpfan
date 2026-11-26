@@ -196,7 +196,9 @@ sealed class Controller {
                 catch (Exception e) when (e is TimeoutException || e is IOException) {
                     errors++; windowErrors++;
                     if (errors <= 3 || errors % 100 == 0) Log($"EC/sensor error #{errors}: {e.Message}");
-                    _applied = null;   // a write may have been cut short: rewrite once the EC is calm
+                    // A write may have been cut short: rewrite once the EC is calm. Only then: any write to 0x2F,
+                    // even of the same value, restarts the EC's fan ramp (an audible dip, and it breaks a duty hold).
+                    if (e.Message.StartsWith("write ")) _applied = null;
                     Quiet(5);          // back off instead of hammering a busy EC
                 }
             }

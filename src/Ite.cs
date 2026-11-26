@@ -62,7 +62,8 @@ sealed class SuperIo : IDisposable {
 /// rewritten every 100 ms: measured 2026-11-26, the fan then holds within ±15 rpm (0x9E = 5320 rpm) and the
 /// firmware never gets more than 3 counts back. If this stops (crash, service stop) the firmware returns to its own
 /// target within ~3 s. Every write is checked: the I2EC address must read back as 0x1804 and the duty must lie
-/// between level 7's and the held one, so nothing is written if the EC is in another state.
+/// between 0x20 and the held one (above it = the EC is at a higher level), so nothing is written if the EC is in
+/// another state. Low values are allowed: a write to 0x2F restarts the firmware's ramp from about 0x46.
 sealed class DutyHold : IDisposable {
     const ushort Pwm = 0x1804;
     readonly SuperIo _sio;
@@ -89,7 +90,7 @@ sealed class DutyHold : IDisposable {
             if (w < 0) { fails = 0; Error = null; }
             else {
                 byte d = (byte)w;
-                try { _sio.Locked(() => _sio.I2ecWriteChecked(Pwm, v => v >= 0x50 && v <= Math.Max(d, (byte)0x90), d)); fails = 0; Error = null; }
+                try { _sio.Locked(() => _sio.I2ecWriteChecked(Pwm, v => v >= 0x20 && v <= Math.Max(d, (byte)0x90), d)); fails = 0; Error = null; }
                 catch (Exception e) { if (++fails >= 10 && Error == null) Error = e.Message; }
             }
             Thread.Sleep(100);
