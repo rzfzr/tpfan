@@ -29,6 +29,7 @@ static class Program {
                 case "monitor": return Monitor(a.Length > 1 ? int.Parse(a[1]) : 10);
                 case "set": return Set(a[1]);
                 case "probe": return Probe(a.Length > 1 ? a[1] : "probe.log");
+                case "ec-sniff": return Sniff(a.Length > 1 ? int.Parse(a[1]) : 60);
                 case "smu": {   // limits in force, from the PM table
                     using var smu = new Smu();
                     var t = smu.Table(out ulong ver);
@@ -78,6 +79,40 @@ static class Program {
         for (int i = 0; i < secs; i++) { Console.WriteLine(Line(ec, t)); Thread.Sleep(1000); }
         return 0;
     }
+    /// Watches the EC status register (stop the service first, so all traffic seen is someone else's) and groups
+    /// its changes into transactions: bits 0x01 output full, 0x02 input full, 0x08 last write was a command,
+    /// 0x10 burst, 0x20 SCI event pending (Windows will query it), 0x40 SMI event pending (firmware).
+    static int Sniff(int secs) {
+        using var ec = new Ec();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var changes = new List<(double t, byte s)>();
+        byte prev = ec.Status(); long samples = 0;
+        changes.Add((0, prev));
+        while (sw.ElapsedMilliseconds < secs * 1000L) {
+            byte s = ec.Status(); samples++;
+            if (s != prev) { changes.Add((sw.Elapsed.TotalMilliseconds, s)); prev = s; }
+        }
+        Console.WriteLine($"{samples / (double)secs:F0} reads/s, {changes.Count - 1} changes in {secs} s");
+        // a transaction = changes less than 20 ms apart
+        var bursts = new List<List<(double t, byte s)>>();
+        for (int i = 1; i < changes.Count; i++) {
+            if (bursts.Count == 0 || changes[i].t - bursts[^1][^1].t > 20) bursts.Add(new List<(double, byte)>());
+            bursts[^1].Add(changes[i]);
+        }
+        int sci = 0, smi = 0, other = 0;
+        double lastSci = -1; var sciGaps = new List<double>();
+        foreach (var b in bursts) {
+            bool hasSci = b.Any(c => (c.s & 0x20) != 0), hasSmi = b.Any(c => (c.s & 0x40) != 0);
+            if (hasSci) { sci++; if (lastSci >= 0) sciGaps.Add((b[0].t - lastSci) / 1000); lastSci = b[0].t; }
+            else if (hasSmi) smi++; else other++;
+            string kind = hasSci ? "SCI event (Windows query)" : hasSmi ? "SMI event (firmware)" : "no event flag (someone's read/write)";
+            Console.WriteLine($"{b[0].t / 1000,8:F3} s  {b[^1].t - b[0].t,6:F2} ms  {kind,-38} {string.Join(">", b.Select(c => c.s.ToString("X2")))}");
+        }
+        Console.WriteLine($"transactions: {bursts.Count} ({sci} SCI events, {smi} SMI events, {other} without an event flag)");
+        if (sciGaps.Count > 0) Console.WriteLine($"SCI events every {sciGaps.Average():F1} s on average (min {sciGaps.Min():F1}, max {sciGaps.Max():F1})");
+        return 0;
+    }
+
     static int Set(string v) {
         using var ec = new Ec();
         byte b = v == "auto" ? (byte)0x80 : Convert.ToByte(v, 16);

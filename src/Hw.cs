@@ -40,11 +40,15 @@ sealed class Ec : IDisposable {
     readonly Mutex _mutex = new Mutex(false, @"Global\Access_EC");
 
     byte In(byte port) => (byte)_m.Exec("ioctl_pio_read", new ulong[] { port }, 1)[0];
+    /// The status register (port 0x66): reading it never takes anything from anyone. For the ec-sniff diagnostic.
+    public byte Status() => In(Cmd);
     void Out(byte port, byte v) => _m.Exec("ioctl_pio_write", new ulong[] { port, v }, 0);
+    string _op = "";
     void Wait(int mask, bool set, string what) {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (((In(Cmd) & mask) != 0) != set) {
-            if (sw.ElapsedMilliseconds > 50) throw new TimeoutException("EC " + what);
+        int st;
+        while ((((st = In(Cmd)) & mask) != 0) != set) {
+            if (sw.ElapsedMilliseconds > 50) throw new TimeoutException($"{_op}: EC {what} (status 0x{st:X2})");
             Thread.SpinWait(50);
         }
     }
@@ -55,8 +59,8 @@ sealed class Ec : IDisposable {
     // (Global\Access_EC only covers other user-mode tools). When two transactions interleave, the EC
     // pairs our bytes with Windows' ones: a read returns a byte meant for Windows, and a write can
     // land on another register. On 2026-11-20..23 that happened at wake-up and switched off the
-    // TrackPoint. So: never take an output byte we did not ask for, never retry in a loop, and let
-    // the caller double-check a value before acting on it.
+    // TrackPoint. So: never take an output byte we did not ask for, never retry in a loop (one retry of a
+    // dropped read, below, is not a loop), and let the caller double-check a value before acting on it.
     T Locked<T>(Func<T> f) {
         bool got = false;
         try {
@@ -66,10 +70,23 @@ sealed class Ec : IDisposable {
     }
     // A pending output byte is someone else's answer: wait for its owner to collect it.
     void WaitIdle() { Wait(1, false, "busy (OBF)"); WaitIbfClear(); }
-    public byte Read(byte addr) => Locked(() => {
+
+    // Dropped reads (measured 2026-11-26): about once a minute the EC takes a read command and its address and
+    // never answers. That is not a collision: with tpfan stopped, `tpfan ec-sniff` saw no other port traffic in 90 s
+    // but one 1.35 ms Windows event query, and each failure ended with tpfan's own address byte as the last write
+    // (status 0x00, no command after it). The firmware simply drops the read, likely while busy with internal work
+    // (the battery). Nobody else gets a wrong byte, so the read is tried once more after 5 ms.
+    public int DroppedReads;   // dropped and retried; logged by the controller
+    byte ReadOnce(byte addr) => Locked(() => {
+        _op = $"read 0x{addr:X2}";
         WaitIdle(); Out(Cmd, 0x80); WaitIbfClear(); Out(Data, addr); WaitObfSet(); return In(Data);
     });
+    public byte Read(byte addr) {
+        try { return ReadOnce(addr); }
+        catch (TimeoutException e) when (e.Message.Contains("EC OBF")) { DroppedReads++; Thread.Sleep(5); return ReadOnce(addr); }
+    }
     public void Write(byte addr, byte v) => Locked(() => {
+        _op = $"write 0x{addr:X2}";
         WaitIdle(); Out(Cmd, 0x81); WaitIbfClear(); Out(Data, addr); WaitIbfClear(); Out(Data, v); WaitIbfClear(); return 0;
     });
     /// Two reads that must agree; a collision shows up as a mismatch and throws instead of returning junk.

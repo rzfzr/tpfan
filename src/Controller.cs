@@ -143,13 +143,18 @@ sealed class Controller {
         ReloadIfChanged();
         Log("start");
         PowerWatch.Start(OnPower, () => Kick(2));
-        int errors = 0;
+        int errors = 0, windowErrors = 0;
+        var summaryAt = DateTime.UtcNow;
         try {
             while (!_stop) {
                 Thread.Sleep((int)_cfg.PollMs);
+                if ((DateTime.UtcNow - summaryAt).TotalMinutes >= 10) {   // EC health, every 10 minutes
+                    if (ec.DroppedReads > 0 || windowErrors > 0) Log($"EC last 10 min: {ec.DroppedReads} reads dropped by the EC and retried, {windowErrors} errors");
+                    ec.DroppedReads = 0; windowErrors = 0; summaryAt = DateTime.UtcNow;
+                }
                 try { if (Cycle(ec, amd)) errors = 0; }
                 catch (Exception e) when (e is TimeoutException || e is IOException) {
-                    errors++;
+                    errors++; windowErrors++;
                     if (errors <= 3 || errors % 100 == 0) Log($"EC/sensor error #{errors}: {e.Message}");
                     _applied = null;   // a write may have been cut short: rewrite once the EC is calm
                     Quiet(5);          // back off instead of hammering a busy EC

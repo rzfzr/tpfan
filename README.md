@@ -46,7 +46,12 @@ in bursts. Windows lost or misread those events, and on 2026-11-20..23 the Track
 wake-ups (data reporting left disabled; restarting `EPDCtrl.exe` re-enables it). Now:
 
 - it writes `0x2F` only on a step change; `0x2F` and RPM are read every `VerifySec` (5 s), not every poll;
-- a read is done twice and must agree, an output byte it didn't ask for is never taken, errors back off 5 s
+- a read is done twice and must agree, an output byte it didn't ask for is never taken, errors back off 5 s;
+- about once a minute the EC accepts a read and never answers it (measured 2026-11-26). That is not a collision:
+  with tpfan stopped, `tpfan ec-sniff` saw no other port traffic in 90 s apart from one 1.35 ms Windows event
+  query, and each such failure ended with tpfan's own address byte as the last write. The firmware drops the read,
+  likely while busy with internal work, so a dropped read is retried once after 5 ms. Every 10 minutes the log
+  counts them (`EC last 10 min: n reads dropped by the EC and retried`)
   instead of retrying;
 - a different `0x2F` is corrected only when the same value is seen on 3 checks in a row, at most once a minute;
 - display off / suspend hands the fan to BIOS auto and stops EC access; display on / resume (and any >5 s
@@ -91,6 +96,7 @@ Elevated, with the service stopped (`Stop-Service tpfan`):
 | `tpfan dump` | hex dump of EC RAM `0x00–0xFF` |
 | `tpfan set <hex\|auto>` | write `0x2F` directly |
 | `tpfan probe [log]` | measure RPM for every level, then BIOS auto under full CPU load (~8 min) |
+| `tpfan ec-sniff [s]` | watch the EC status register and list everyone else's transactions (default 60 s) |
 
 `status.txt` is rewritten every second. Tctl comes from the CPU, so it is reported even while EC access is
 paused (display off, after wake, after an EC error); only the fan part then says `paused (...)`.
@@ -158,7 +164,7 @@ How it sits on the taskbar:
 
 Cost, measured on 2026-11-26: 0.47 % of one core and 17 MB private memory, against 2.3 % and 51 MB for HWiNFO
 (sensors-only) alone. (tpfan's `EC OBF` errors, about one a minute, went on at the same rate without HWiNFO:
-they are collisions with Windows' own EC traffic.) It is plain Win32 with source-generated P/Invoke, so it can be
+the EC firmware drops a read now and then; see EC safety above.) It is plain Win32 with source-generated P/Invoke, so it can be
 built with NativeAOT for a smaller footprint once the "Desktop development with C++" build tools are installed.
 
 ```powershell
