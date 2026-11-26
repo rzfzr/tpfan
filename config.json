@@ -10,7 +10,7 @@
   "DownHoldSec": 25,     // must be cooler than Down for 25 s before stepping down
   "EmergencyTemp": 95,   // raw Tctl >= 95 for 5 s -> top step (capped at 97 in code)
   "EmergencySec": 5,
-  // Top step is 4200 rpm on purpose: full speed (40) is never used. The mode's FanUp/FanDown replace its Up/Down.
+  // Top step is 4200 rpm on purpose: only a mode's FanBoost goes above it. The mode's FanUp/FanDown replace its Up/Down.
   "Steps": [
     { "Ec": "80", "Up": 0,  "Down": 0,  "Note": "BIOS auto" },
     { "Ec": "7",  "Up": 85, "Down": 78, "Note": "4200 rpm" }
@@ -31,6 +31,10 @@
       "PowerMode": "best-performance", "MaxFreqMHz": 4000, "FanUp": 90, "FanDown": 82 },
     { "Name": "Maximum", "TctlTemp": 99, "StapmLimit": 35, "FastLimit": 50, "SlowLimit": 35, "StapmTime": 20, "SlowTime": 45,
       "VrmCurrent": 40, "VrmMaxCurrent": 70, "VrmSocCurrent": 64, "VrmSocMaxCurrent": 70, "Boost": "max-performance",
-      "PowerMode": "best-performance", "MaxFreqMHz": 0, "FanUp": 78, "FanDown": 70 }
+      "PowerMode": "best-performance", "MaxFreqMHz": 0, "FanUp": 78, "FanDown": 70,
+      // Faster fan for long all-core loads (builds) only: smoothed Tctl >= 97 and CPU load >= 90 % for 120 s turns it
+      // on; it stays at least 120 s and goes back to 4200 rpm after 30 s with load < 60 % or Tctl < 90.
+      "FanBoost": { "Ec": "40", "Note": "6300 rpm", "Temp": 97, "Load": 90, "AfterSec": 120, "MinSec": 120,
+                    "ExitLoad": 60, "ExitTemp": 90, "ExitSec": 30 } }
   ]
 }

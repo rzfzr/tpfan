@@ -62,6 +62,28 @@ sealed class Controller {
     DateTime _belowSince = DateTime.MaxValue, _hotSince = DateTime.MaxValue;
     volatile bool _stop;
 
+    // FanBoost (the mode's speed above the top step, for long all-core loads)
+    readonly CpuLoad _cpu = new CpuLoad();
+    double _load = double.NaN;            // CPU load %, smoothed like Tctl
+    bool _boost;
+    double _boostCredit;                  // seconds towards turning it on (or, while on, off); time against counts down
+    DateTime _boostSince;
+
+    /// Forget the fan state, so the next cycle starts again from the current readings.
+    void ResetFan() { _idx = -1; _ema = double.NaN; _load = double.NaN; _boost = false; _boostCredit = 0; }
+
+    /// Turns FanBoost on or off; returns the log reason, or null when nothing changed.
+    string UpdateBoost(DateTime now, double dt) {
+        var fb = _cfg.CurrentMode?.FanBoost;
+        if (fb == null) { _boostCredit = 0; if (!_boost) return null; _boost = false; return "unboost (mode)"; }
+        if (double.IsNaN(_load)) return null;
+        bool towards = _boost ? _load < fb.ExitLoad || _ema < fb.ExitTemp : _load >= fb.Load && _ema >= fb.Temp;
+        _boostCredit = Math.Max(0, _boostCredit + (towards ? dt : -dt));
+        if (!_boost && _boostCredit >= fb.AfterSec) { _boost = true; _boostSince = now; _boostCredit = 0; return "boost"; }
+        if (_boost && _boostCredit >= fb.ExitSec && (now - _boostSince).TotalSeconds >= fb.MinSec) { _boost = false; _boostCredit = 0; return "unboost"; }
+        return null;
+    }
+
     // EC safety (see Ec in Hw.cs): every EC transaction can collide with Windows' EC driver, so write
     // only on a real step change, verify rarely, and leave the EC alone while it is busiest (wake-up).
     byte? _applied;                       // last value written to 0x2F (null = unknown, write on next cycle)
@@ -181,17 +203,19 @@ sealed class Controller {
                 _handback = false;
                 if (_applied != 0x80) { ec.Write(Tp.FanCtl, 0x80); _applied = 0x80; }
             }
-            _idx = -1; _ema = double.NaN; Status(now, TctlOrNaN(amd), "paused (display off)"); return false;
+            ResetFan(); Status(now, TctlOrNaN(amd), "paused (display off)"); return false;
         }
-        if (now.Ticks < Interlocked.Read(ref _quietUntil)) { _idx = -1; _ema = double.NaN; Status(now, TctlOrNaN(amd), "paused (EC quiet)"); return false; }
+        if (now.Ticks < Interlocked.Read(ref _quietUntil)) { ResetFan(); Status(now, TctlOrNaN(amd), "paused (EC quiet)"); return false; }
 
         double t = amd.Tctl();
         if (t < 20 || t > 115) {   // implausible reading: let the BIOS drive the fan
             if (_applied != 0x80) { ec.Write(Tp.FanCtl, 0x80); _applied = 0x80; Log($"bad tctl {t:F1}, BIOS auto"); }
-            _idx = -1; return true;
+            ResetFan(); return true;
         }
-        // after a long gap (sleep/resume) restart the average from the current reading
-        _ema = double.IsNaN(_ema) || dt >= 5 ? t : _ema + (t - _ema) * (1 - Math.Exp(-dt / _cfg.SmoothSec));
+        // after a long gap (sleep/resume) restart the averages from the current reading
+        double k = 1 - Math.Exp(-dt / _cfg.SmoothSec), load = _cpu.Sample();
+        _ema = double.IsNaN(_ema) || dt >= 5 ? t : _ema + (t - _ema) * k;
+        if (!double.IsNaN(load)) _load = double.IsNaN(_load) || dt >= 5 ? load : _load + (load - _load) * k;
         if (_idx < 0) _idx = Math.Max(0, steps.FindLastIndex(s => s.Up <= _ema));
 
         if (t >= Math.Min(_cfg.EmergencyTemp, 97)) { if (_hotSince == DateTime.MaxValue) _hotSince = now; }
@@ -204,13 +228,16 @@ sealed class Controller {
             _idx++; _lastUp = now; why = "up";
         }
 
-        if (why != null || _idx == 0 || _ema >= steps[_idx].Down) _belowSince = DateTime.MaxValue;
+        why = UpdateBoost(now, dt) ?? why;
+        var fb = _cfg.CurrentMode?.FanBoost;
+        if (_boost) { _idx = steps.Count - 1; _belowSince = DateTime.MaxValue; }   // the boost sits on the top step
+        else if (why != null || _idx == 0 || _ema >= steps[_idx].Down) _belowSince = DateTime.MaxValue;
         else {
             if (_belowSince == DateTime.MaxValue) _belowSince = now;
             if ((now - _belowSince).TotalSeconds >= _cfg.DownHoldSec) { _idx--; why = "down"; _belowSince = DateTime.MaxValue; }
         }
 
-        byte want = steps[_idx].Value;
+        byte want = _boost ? fb.Value : steps[_idx].Value;
         if (_applied != want) {
             ec.Write(Tp.FanCtl, want); _applied = want; _lastVerify = now; _oddCount = 0;
             if (why == null) why = "apply";
@@ -228,10 +255,13 @@ sealed class Controller {
                 }
             }
         }
-        if (why != null) Log($"{why,-9} step={_idx} ec=0x{want:X2} tctl={t:F1} ema={_ema:F1}");
+        // With FanBoost, the boost counts as one more step after the top one.
+        int shown = _boost ? steps.Count : _idx, top = steps.Count - (fb == null ? 1 : 0);
+        if (why != null) Log($"{why,-9} step={shown} ec=0x{want:X2} tctl={t:F1} ema={_ema:F1} load={_load:F0}");
 
         if ((now - _lastRpm).TotalSeconds >= _cfg.VerifySec) { _lastRpm = now; _rpm = Tp.Rpm(ec); }
-        Status(now, t, $"step={_idx}/{steps.Count - 1} ({steps[_idx].Note}) ec=0x{want:X2} rpm={_rpm}");
+        string boost = fb == null ? "" : _boost ? $" boost=on load={_load:F0}" : $" boost={_boostCredit:F0}/{fb.AfterSec:F0}s load={_load:F0}";
+        Status(now, t, $"step={shown}/{top} ({(_boost ? fb.Note : steps[_idx].Note)}) ec=0x{want:X2} rpm={_rpm}{boost}");
         return true;
     }
 

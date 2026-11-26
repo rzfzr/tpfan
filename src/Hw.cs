@@ -110,6 +110,20 @@ sealed class AmdTemp : IDisposable {
     public void Dispose() => _m.Dispose();
 }
 
+/// Share of all logical processors busy since the last sample, from GetSystemTimes (kernel time includes idle).
+sealed class CpuLoad {
+    [DllImport("kernel32.dll")] static extern bool GetSystemTimes(out long idle, out long kernel, out long user);
+    long _idle, _total;
+    public CpuLoad() => Sample();
+    /// Percent, 0..100; NaN if nothing elapsed.
+    public double Sample() {
+        if (!GetSystemTimes(out long idle, out long kernel, out long user)) return double.NaN;
+        long total = kernel + user, di = idle - _idle, dt = total - _total;
+        _idle = idle; _total = total;
+        return dt <= 0 ? double.NaN : Math.Clamp(100.0 * (dt - di) / dt, 0, 100);
+    }
+}
+
 /// ThinkPad EC fan registers.
 static class Tp {
     public const byte FanCtl = 0x2F;   // bits0-2 level, 0x40 disengaged (max), 0x80 BIOS auto

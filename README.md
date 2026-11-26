@@ -27,7 +27,9 @@ register below `0x100` exposes the auto targets, so they can't be set directly.
 - **Above it:** when the 6-second average of Tctl reaches 85 °C, the fan goes to 4200 rpm (level 7). It returns
   to BIOS auto after 25 s below 78 °C.
 - **Emergency:** raw Tctl ≥ 95 °C for 5 s jumps to the top step.
-- **Full speed (6300 rpm) is not used** by the default config: it's far above anything the BIOS does.
+- **Long-load boost:** above 4200 rpm only in a mode with `FanBoost` (Maximum), and only for long all-core loads
+  such as builds; see [Long-load boost](#long-load-boost-fanboost). Otherwise full speed (6300 rpm) is never used:
+  it's far above anything the BIOS does.
 - **Fail-safe:** service stop or shutdown and an implausible Tctl put the fan back in BIOS auto; display off
   and suspend do too (see below). A crash exits non-zero and the service restarts.
 
@@ -174,6 +176,35 @@ powershell -ExecutionPolicy Bypass -File .\bar\install.ps1              # build,
 powershell -ExecutionPolicy Bypass -File .\bar\install.ps1 -Aot         # the same, NativeAOT
 powershell -ExecutionPolicy Bypass -File .\bar\install.ps1 -Uninstall
 ```
+
+## Long-load boost (FanBoost)
+
+A mode can have a `FanBoost`: a speed above the top step, for long all-core loads only (a big build), never for
+bursts. The default config gives it to Maximum, at full speed (`0x40`, 6300 rpm):
+
+- **On** after the smoothed Tctl has been ≥ 97 °C *and* the smoothed CPU load (all threads, from `GetSystemTimes`)
+  ≥ 90 % for 120 s. Time that doesn't qualify counts back down instead of resetting, so a short dip in a build
+  delays the boost without starting over.
+- **Stays on** at least 120 s, so it never comes on for a few seconds and goes away again.
+- **Off** (back to 4200 rpm) after 30 s, counted the same way, with the load < 60 % or Tctl < 90 °C. It ends on the
+  load, not the temperature: with more cooling the CPU boosts higher and stays at its limit (99 °C), so the
+  temperature only drops once the load does.
+- Switching to a mode without `FanBoost` ends it at once; so do display off, suspend and an EC pause.
+
+`status.txt` shows ` boost=<s>/120s load=<%>` while it builds up and ` boost=on` while it runs (the step is then
+one past the top, e.g. `step=2/2`); the log has `boost` and `unboost` lines. tpfan-bar draws the rpm red.
+
+```jsonc
+"FanBoost": { "Ec": "40", "Note": "6300 rpm", "Temp": 97, "Load": 90, "AfterSec": 120, "MinSec": 120,
+              "ExitLoad": 60, "ExitTemp": 90, "ExitSec": 30 }
+```
+
+No speed between 4200 and 6300 rpm was found (2026-11-26, under a full load):
+
+- Alternating `0x07` and `0x40` (`tpfan dither`, 0.5–2 s periods) doesn't average out: every switch restarts the
+  EC's fan ramp, so the fan *slowed down* to about 2900 rpm.
+- The EC reads only bits 0–2 of `0x2F` below `0x40` (`tpfan sweep`, `0x08`–`0x30`): `0x08`, `0x10`, `0x18`, `0x20`,
+  `0x28`, `0x30` stop the fan like level 0, and `0x0B`, `0x0F`, `0x17`, `0x1F`, `0x27`, `0x2F` run at 4200 like 3–7.
 
 ## Config
 

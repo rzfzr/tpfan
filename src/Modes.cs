@@ -23,6 +23,7 @@ sealed class CpuMode {
     // Fan: replaces Up/Down of the top step
     public double? FanUp { get; set; }
     public double? FanDown { get; set; }
+    public FanBoost FanBoost { get; set; }        // a faster fan above the top step, for long all-core loads only
 
     /// SMU (message, value) pairs, in the order UXTU sends them.
     public (uint msg, uint value, string name)[] SmuMessages() {
@@ -49,6 +50,31 @@ sealed class CpuMode {
         if (Boost != null && Boost != "max-performance" && Boost != "power-saving") throw new System.IO.InvalidDataException($"mode {Name}: Boost must be max-performance or power-saving");
         if (PowerMode != null && WinPower.Overlay(PowerMode) == null) throw new System.IO.InvalidDataException($"mode {Name}: unknown PowerMode {PowerMode}");
         if ((FanUp == null) != (FanDown == null) || FanDown >= FanUp) throw new System.IO.InvalidDataException($"mode {Name}: FanUp and FanDown go together, Down below Up");
+        FanBoost?.Validate(Name);
+    }
+}
+
+/// The fan above the top step (4200 rpm), only while the CPU has sat at its temperature limit under a full load for
+/// a long time: a long build, not a burst. Once on it stays on for a while, so the fan never jumps up for a few
+/// seconds and back. It ends on the load, not the temperature: with more cooling the CPU only boosts higher and
+/// stays at its limit, so the temperature drops only once the load does.
+sealed class FanBoost {
+    public string Ec { get; set; } = "40";        // 0x2F value; 0x40 = full speed (6300 rpm)
+    public string Note { get; set; } = "6300 rpm";
+    public double Temp { get; set; } = 97;        // smoothed Tctl at or above this
+    public double Load { get; set; } = 90;        // and smoothed CPU load (% of all threads) at or above this
+    public double AfterSec { get; set; } = 120;   // for this long (time below counts back down, not to zero)
+    public double MinSec { get; set; } = 120;     // once on, at least this long
+    public double ExitLoad { get; set; } = 60;    // off when the load is below this, or Tctl below ExitTemp,
+    public double ExitTemp { get; set; } = 90;
+    public double ExitSec { get; set; } = 30;     // for this long (counted the same way)
+    internal byte Value => Convert.ToByte(Ec, 16);
+
+    public void Validate(string mode) {
+        _ = Value;
+        if (Temp > 100 || ExitTemp >= Temp) throw new System.IO.InvalidDataException($"mode {mode}: FanBoost Temp at most 100, ExitTemp below it");
+        if (Load > 100 || ExitLoad >= Load) throw new System.IO.InvalidDataException($"mode {mode}: FanBoost Load at most 100, ExitLoad below it");
+        if (AfterSec < 0 || MinSec < 0 || ExitSec < 0) throw new System.IO.InvalidDataException($"mode {mode}: FanBoost times can't be negative");
     }
 }
 
