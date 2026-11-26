@@ -179,11 +179,6 @@ sealed class Modes {
         } catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is System.Text.Json.JsonException || e is KeyNotFoundException || e is InvalidOperationException) { }
     }
 
-    public string After(string name) {
-        int i = All.FindIndex(m => m.Name == name);
-        return All.Count == 0 ? null : All[(i + 1) % All.Count].Name;
-    }
-
     public bool Request(string name) {
         try {
             string text = File.ReadAllText(ConfigFile);

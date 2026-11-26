@@ -129,7 +129,7 @@ Left to right:
 
 | Item | Shows | Source |
 |---|---|---|
-| Mode | **E**co (green), **P**erformance (white), **M**aximum (red); grey while a switch is pending. **Click: next mode** | `mode=` in tpfan's `status.txt`; a click rewrites `"Mode"` in its config |
+| Mode switch | one letter per mode in the config: **E P M**. The applied one is lit (Eco green, Performance white, Maximum red), the others dim; grey while a switch is pending. **Click a letter: that mode** | `mode=` in tpfan's `status.txt`; a click rewrites `"Mode"` in its config |
 | CPU | one green bar per physical core: the busier of its two threads | `\Processor Information(*)\% Processor Utility`, Task Manager's CPU figure |
 | Disk | orange pie: active time | `\PhysicalDisk(_Total)\% Idle Time` (active = 100 − idle, as in Task Manager) |
 | Network | ▲ send (blue) and ▼ receive (green) in Task Manager's units (Kbps, Mbps, Gbps) | `GetIfTable2`, hardware adapters only, so VPN tunnels aren't counted twice |

@@ -25,6 +25,7 @@ static class Palette {
     public static Rgba Send(bool l) => Pick(l, 0x5AB0FF, 0x005FB8);
     public static Rgba Recv(bool l) => Pick(l, 0x74E27E, 0x107C10);
     public static Rgba Track(bool l) => l ? new Rgba(46, 0x000000) : new Rgba(56, 0xFFFFFF);
+    public static Rgba Dim(bool l) => l ? new Rgba(80, 0x1A1A1A) : new Rgba(70, 0xFFFFFF);
     public static Rgba Hover(bool l) => l ? new Rgba(28, 0x000000) : new Rgba(36, 0xFFFFFF);
     public static Rgba Mode(string name, bool l) => name switch {
         "Eco" => Green(l), "Performance" => Text(l), "Maximum" => Red(l), _ => Cpu(l),

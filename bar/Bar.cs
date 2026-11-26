@@ -19,7 +19,9 @@ sealed unsafe class Bar {
     const uint TimerLayout = 1, TimerData = 2;
 
     enum Kind { Mode, Cpu, Disk, Net, Ram, Power, Temp, Rate, Battery }
-    sealed class Item { public Kind Kind; public int X, W; public string Tip = ""; }
+    /// Gap = space to the next item. Mode items are one per mode (a 3-way switch); Mode holds its name.
+    sealed class Item { public Kind Kind; public int X, W, Gap; public string Mode, Tip = ""; }
+    string _modeNames = "";   // the modes the switch was laid out for
 
     readonly Sensors _s = new Sensors();
     readonly Modes _modes = new Modes();
@@ -169,7 +171,6 @@ sealed unsafe class Bar {
         _cores = Math.Max(1, _s.CoreLoad.Length == 0 ? 6 : _s.CoreLoad.Length);
         int unitGap = S(2), small = S(PixelFont.Small.Width("W"));
         var widths = new (Kind, int)[] {
-            (Kind.Mode, S(PixelFont.Big.Width("M"))),
             (Kind.Cpu, _cores * S(3) + (_cores - 1) * S(1)),
             (Kind.Disk, Dia),
             (Kind.Net, S(5) + S(3) + NetText),
@@ -181,7 +182,16 @@ sealed unsafe class Bar {
         };
         _items.Clear();
         int x = S(6);
-        foreach (var (k, w) in widths) { _items.Add(new Item { Kind = k, X = x, W = w }); x += w + S(10); }
+        // The mode switch: one letter per mode in tpfan's config, close together.
+        var names = _modes.All.Count > 0 ? _modes.All.Select(m => m.Name).ToList() : new List<string> { null };
+        _modeNames = string.Join(",", names);
+        for (int i = 0; i < names.Count; i++) {
+            int w = S(PixelFont.Big.Width(Letter(names[i])));
+            int gap = i == names.Count - 1 ? S(10) : S(6);
+            _items.Add(new Item { Kind = Kind.Mode, Mode = names[i], X = x, W = w, Gap = gap });
+            x += w + gap;
+        }
+        foreach (var (k, w) in widths) { _items.Add(new Item { Kind = k, X = x, W = w, Gap = S(10) }); x += w + S(10); }
         _w = x - S(10) + S(6);
         if (_canvas == null || _canvas.W != _w || _canvas.H != _h) {
             _canvas = new Canvas(_w, _h);
@@ -194,11 +204,21 @@ sealed unsafe class Bar {
         SyncTools(true);
     }
 
+    /// An item's mouse area: half the gap on each side (the strip's margin at the ends), so neighbours never overlap.
+    (int Left, int Right) Area(int i) {
+        var it = _items[i];
+        int left = i == 0 ? 0 : it.X - _items[i - 1].Gap / 2;
+        int right = i == _items.Count - 1 ? _w : it.X + it.W + (it.Gap + 1) / 2;
+        return (left, right);
+    }
+
     int Hit(int x) {
-        int half = S(6);
-        for (int i = 0; i < _items.Count; i++) if (x >= _items[i].X - half && x < _items[i].X + _items[i].W + half) return i;
+        for (int i = 0; i < _items.Count; i++) { var (a, b) = Area(i); if (x >= a && x < b) return i; }
         return -1;
     }
+
+    static string Letter(string mode) =>
+        mode != null && mode.Length > 0 && PixelFont.Big.Has(char.ToUpperInvariant(mode[0])) && char.IsLetter(mode[0]) ? char.ToUpperInvariant(mode[0]).ToString() : "?";
 
     // ---- data and drawing ------------------------------------------------------------------------------------
 
@@ -207,7 +227,8 @@ sealed unsafe class Bar {
         _modes.Refresh();
         _light = Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "SystemUsesLightTheme", 0) is int v && v == 1;
         if (_strip == IntPtr.Zero) return;
-        if (_s.CoreLoad.Length != 0 && _s.CoreLoad.Length != _cores) Measure();
+        string names = _modes.All.Count > 0 ? string.Join(",", _modes.All.Select(m => m.Name)) : "";
+        if ((_s.CoreLoad.Length != 0 && _s.CoreLoad.Length != _cores) || names != _modeNames) Measure();
         Tooltips();
         Draw();
     }
@@ -216,15 +237,21 @@ sealed unsafe class Bar {
         if (_strip == IntPtr.Zero || _canvas == null) return;
         var c = _canvas; bool l = _light;
         c.Clear();
-        if (_hover >= 0 && _hover < _items.Count) { var hi = _items[_hover]; c.Fill(hi.X - S(4), S(2), hi.W + S(8), _h - S(4), Palette.Hover(l)); }
+        if (_hover >= 0 && _hover < _items.Count) {
+            var hi = _items[_hover];
+            int pad = Math.Min(S(4), hi.Gap / 2);
+            c.Fill(hi.X - pad, S(2), hi.W + 2 * pad, _h - S(4), Palette.Hover(l));
+        }
         foreach (var it in _items) {
             int x = it.X;
             switch (it.Kind) {
                 case Kind.Mode: {
-                    string applied = _s.ModeApplied, requested = _modes.Requested, shown = applied ?? requested;
-                    bool pending = applied == null || applied != requested;
-                    string letter = shown != null && shown.Length > 0 && "EPM".Contains(char.ToUpperInvariant(shown[0])) ? char.ToUpperInvariant(shown[0]).ToString() : "?";
-                    c.Text(PixelFont.Big, letter, x, BigY, _scale, pending ? Palette.Grey(l) : Palette.Mode(applied, l));
+                    // lit: the mode tpfan has applied; grey: the one asked for, still being applied; dim: the others
+                    string applied = _s.ModeApplied, requested = _modes.Requested;
+                    var color = it.Mode != null && it.Mode == applied && applied == requested ? Palette.Mode(it.Mode, l)
+                              : it.Mode != null && it.Mode == requested ? Palette.Grey(l)
+                              : Palette.Dim(l);
+                    c.Text(PixelFont.Big, Letter(it.Mode), x, BigY, _scale, color);
                     break;
                 }
                 case Kind.Cpu: {
@@ -297,8 +324,8 @@ sealed unsafe class Bar {
         if (i < 0) return;
         if (_items[i].Kind == Kind.Mode) {
             _modes.Refresh();
-            string next = _modes.After(_modes.Requested ?? _s.ModeApplied);
-            if (next != null && _modes.Request(next)) { Tooltips(); Draw(); }
+            string mode = _items[i].Mode;
+            if (mode != null && mode != _modes.Requested && _modes.Request(mode)) { Tooltips(); Draw(); }
         } else if (_items[i].Kind is Kind.Cpu or Kind.Disk or Kind.Net or Kind.Ram) {
             ShellExecute(IntPtr.Zero, "open", "taskmgr.exe", null, null, 1);
         }
@@ -322,7 +349,7 @@ sealed unsafe class Bar {
     // ---- tooltips ------------------------------------------------------------------------------------------
 
     void Tooltips() {
-        foreach (var it in _items) it.Tip = TipFor(it.Kind);
+        foreach (var it in _items) it.Tip = TipFor(it);
         SyncTools(false);
     }
 
@@ -335,7 +362,7 @@ sealed unsafe class Bar {
             try {
                 var ti = new TOOLINFOW {
                     cbSize = (uint)sizeof(TOOLINFOW), uFlags = TTF_SUBCLASS, hwnd = _strip, uId = (IntPtr)(i + 1),
-                    rect = new RECT { Left = it.X - S(6), Top = 0, Right = it.X + it.W + S(6), Bottom = _h }, lpszText = text,
+                    rect = new RECT { Left = Area(i).Left, Top = 0, Right = Area(i).Right, Bottom = _h }, lpszText = text,
                 };
                 if (rects) { SendMessage(_tip, TTM_DELTOOLW, IntPtr.Zero, (IntPtr)(&ti)); SendMessage(_tip, TTM_ADDTOOLW, IntPtr.Zero, (IntPtr)(&ti)); }
                 else SendMessage(_tip, TTM_UPDATETIPTEXTW, IntPtr.Zero, (IntPtr)(&ti));
@@ -343,15 +370,17 @@ sealed unsafe class Bar {
         }
     }
 
-    string TipFor(Kind k) {
-        switch (k) {
+    string TipFor(Item item) {
+        switch (item.Kind) {
             case Kind.Mode: {
-                string applied = _s.ModeApplied, requested = _modes.Requested, shown = applied ?? requested;
-                var summary = _modes.All.Find(m => m.Name == shown).Summary;
-                string next = _modes.After(shown);
-                return (applied == null ? $"Mode: {requested ?? "none"} (tpfan is not applying it)" : applied != requested ? $"Mode: switching to {requested}" : $"Mode: {applied}")
-                       + (next != null ? $"  ·  click for {next}" : "") + (summary != null ? "\n" + summary : "")
-                       + (_s.SmuError ? "\nSMU error: see the tpfan log" : "");
+                if (item.Mode == null) return "No CPU modes in tpfan's config";
+                string applied = _s.ModeApplied, requested = _modes.Requested;
+                var summary = _modes.All.Find(m => m.Name == item.Mode).Summary;
+                string state = item.Mode == applied && applied == requested ? "active"
+                             : item.Mode == requested ? (applied == null ? "selected, but tpfan is not applying it" : "switching…")
+                             : "click to switch";
+                return $"{item.Mode} ({state})" + (summary != null ? "\n" + summary : "")
+                       + (item.Mode == applied && _s.SmuError ? "\nSMU error: see the tpfan log" : "");
             }
             case Kind.Cpu:
                 return $"CPU {Pct(_s.CpuTotal)}" + (_s.CoreLoad.Length == 0 ? "" : "\nCores " + string.Join(" ", _s.CoreLoad.Select(c => c.ToString("0", Inv))) + " %") + "\nClick: Task Manager";
