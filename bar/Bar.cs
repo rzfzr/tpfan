@@ -164,7 +164,8 @@ sealed unsafe class Bar {
     int BigY => (_h - S(PixelFont.Big.Height)) / 2;
     int Dia => Math.Min(S(18), _h - S(6));
     int NumBox(string widest) => S(PixelFont.Big.Width(widest));
-    int NetText => S(Math.Max(PixelFont.Small.Width("99.9 Kbps"), PixelFont.Small.Width("999 Kbps")));
+    int NetNum => S(Math.Max(PixelFont.Mid.Width("99.9"), PixelFont.Mid.Width("999")));
+    int NetUnitW => S(new[] { "Kbps", "Mbps", "Gbps" }.Max(u => PixelFont.Small.Width(u)));
 
     void Measure() {
         _scale = Math.Max(1, (int)Math.Round(_dpi / 96.0));
@@ -173,7 +174,7 @@ sealed unsafe class Bar {
         var widths = new (Kind, int)[] {
             (Kind.Cpu, _cores * S(3) + (_cores - 1) * S(1)),
             (Kind.Disk, Dia),
-            (Kind.Net, S(5) + S(3) + NetText),
+            (Kind.Net, S(5) + S(3) + NetNum + S(2) + NetUnitW),
             (Kind.Ram, Dia),
             (Kind.Power, NumBox("8.8") + unitGap + small),
             (Kind.Temp, NumBox("100") + unitGap + S(PixelFont.Small.Width("o"))),
@@ -263,12 +264,9 @@ sealed unsafe class Bar {
                 case Kind.Disk: c.Pie(_s.DiskActive, x, (_h - Dia) / 2, Dia, S(1), Palette.Disk(l), Palette.Disk(l)); break;
                 case Kind.Ram: c.Pie(_s.RamPercent, x, (_h - Dia) / 2, Dia, S(1), Palette.Ram(l), Palette.Ram(l)); break;
                 case Kind.Net: {
-                    int top = (_h - S(16)) / 2, tx = x + S(8);
-                    c.Text(PixelFont.Small, "^", x, top, _scale, Palette.Send(l));
-                    c.Text(PixelFont.Small, "v", x, top + S(8), _scale, Palette.Recv(l));
-                    string up = NetBar(_s.SendBps), down = NetBar(_s.RecvBps);
-                    c.Text(PixelFont.Small, up, tx + NetText - S(PixelFont.Small.Width(up)), top, _scale, Palette.Send(l));
-                    c.Text(PixelFont.Small, down, tx + NetText - S(PixelFont.Small.Width(down)), top + S(8), _scale, Palette.Recv(l));
+                    int lh = S(PixelFont.Mid.Height), top = (_h - 2 * lh - S(2)) / 2;
+                    NetLine(x, top, _s.SendBps, "^", Palette.Send(l));
+                    NetLine(x, top + lh + S(2), _s.RecvBps, "v", Palette.Recv(l));
                     break;
                 }
                 case Kind.Power: Number(x, NumBox("8.8"), double.IsNaN(_s.CpuW) ? "--" : Num(_s.CpuW), "W", Palette.Cpu(l)); break;
@@ -292,6 +290,15 @@ sealed unsafe class Bar {
             }
         }
         Present();
+    }
+
+    /// One network line: arrow, number (5x11, right-aligned), unit (5x7 on the number's baseline).
+    void NetLine(int x, int y, double bps, string arrow, Rgba color) {
+        var (num, unit) = NetParts(bps);
+        int nx = x + S(8);
+        _canvas.Text(PixelFont.Small, arrow, x, y + S(3), _scale, color);
+        _canvas.Text(PixelFont.Mid, num, nx + NetNum - S(PixelFont.Mid.Width(num)), y, _scale, color);
+        _canvas.Text(PixelFont.Small, unit, nx + NetNum + S(2), y + S(PixelFont.Mid.Height - 7), _scale, color);
     }
 
     int ArrowW => 2 * S(3) + 1;   // odd, so the arrow has a centre column
@@ -441,8 +448,13 @@ sealed unsafe class Bar {
 
     /// Task Manager's network units: bits per second, decimal.
     static (double, string) NetUnit(double bps) => bps >= 999.5e6 ? (bps / 1e9, "Gbps") : bps >= 999.5e3 ? (bps / 1e6, "Mbps") : (bps / 1e3, "Kbps");
-    static string NetLong(double bps) { if (double.IsNaN(bps)) return "n/a"; var (v, u) = NetUnit(bps); return $"{v.ToString(v < 100 ? "0.0" : "0", Inv)} {u}"; }
-    static string NetBar(double bps) => double.IsNaN(bps) ? "--" : NetLong(bps);
+    /// Number and unit: whole Kbps; Mbps and Gbps with one decimal below 100.
+    static (string, string) NetParts(double bps) {
+        if (double.IsNaN(bps)) return ("--", "Kbps");
+        var (v, u) = NetUnit(bps);
+        return (u == "Kbps" ? Math.Round(v).ToString("0", Inv) : v.ToString(v < 100 ? "0.0" : "0", Inv), u);
+    }
+    static string NetLong(double bps) { if (double.IsNaN(bps)) return "n/a"; var (n, u) = NetParts(bps); return $"{n} {u}"; }
 
     static string Dur(double h) { int m = (int)Math.Round(h * 60); return m >= 60 ? $"{m / 60} h {m % 60:00} min" : $"{m} min"; }
 

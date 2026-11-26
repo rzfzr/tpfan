@@ -132,7 +132,7 @@ Left to right:
 | Mode switch | one letter per mode in the config: **E P M**. The applied one is lit (Eco green, Performance white, Maximum red), the others dim; grey while a switch is pending. **Click a letter: that mode** | `mode=` in tpfan's `status.txt`; a click rewrites `"Mode"` in its config |
 | CPU | one green bar per physical core: the busier of its two threads | `\Processor Information(*)\% Processor Utility`, Task Manager's CPU figure |
 | Disk | orange pie: active time | `\PhysicalDisk(_Total)\% Idle Time` (active = 100 − idle, as in Task Manager) |
-| Network | ▲ send (blue) and ▼ receive (green) in Task Manager's units (Kbps, Mbps, Gbps) | `GetIfTable2`, hardware adapters only, so VPN tunnels aren't counted twice |
+| Network | ▲ send (blue) and ▼ receive (green) in Task Manager's units: whole Kbps, Mbps and Gbps with one decimal below 100 | `GetIfTable2`, hardware adapters only, so VPN tunnels aren't counted twice |
 | RAM | blue pie: memory in use | `GlobalMemoryStatusEx` |
 | CPU power, W | blue | Windows' RAPL performance counter `\Energy Meter(RAPL_Package0_PKG)\Power` |
 | CPU temperature, ° (Tctl) | white, yellow from 85, red from 95 | tpfan's `status.txt` (`--` when tpfan isn't running) |
@@ -141,7 +141,7 @@ Left to right:
 
 Hover an item for the exact values (per-core loads, disk read/write speed, adapter names, memory and commit in GB,
 fan speed and step, time to full or empty). Click a meter for Task Manager, the fan for the tpfan log; right-click for Task Manager, the
-tpfan log, Exit. Everything is drawn in pixel fonts (7×14 digits, 5×7 units), scaled by a whole number on larger
+tpfan log, Exit. Everything is drawn in pixel fonts (7×14 digits, 5×11 for the network, 5×7 units), scaled by a whole number on larger
 taskbars, so it stays sharp.
 
 How it sits on the taskbar:
