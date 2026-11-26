@@ -34,6 +34,7 @@ static class Program {
                 case "ec-sniff": return Sniff(a.Length > 1 ? int.Parse(a[1]) : 60);
                 case "sio": return Sio();
                 case "duty-test": return DutyTest(Convert.ToByte(a[1], 16), a.Length > 2 ? int.Parse(a[2]) : 15);
+                case "duty-hold": return DutyHold(a[1].Split(',').Select(x => Convert.ToByte(x, 16)).ToArray(), a.Length > 2 ? int.Parse(a[2]) : 30, a.Length > 3 ? int.Parse(a[3]) : 100);
                 case "i2ec": return I2ec(Convert.ToUInt16(a[1], 16), a.Length > 2 ? Convert.ToInt32(a[2], 16) : 0x40, a.Length > 3 ? a[3] : null);
                 case "smu": {   // limits in force, from the PM table
                     using var smu = new Smu();
@@ -123,6 +124,47 @@ static class Program {
         } finally {
             WriteFanCtl(ec, 0x80);
             Console.WriteLine("fan back to BIOS auto");
+        }
+        return 0;
+    }
+
+    /// Holds each duty for secs at level 7 by rewriting it every periodMs against the firmware's pull back to 4200 rpm,
+    /// and reports the rpm it settles at and its spread. Every write is checked (address, and a current value between
+    /// level 7's duty and the one being held). Ends with the fan back in BIOS auto. Stop the service first.
+    static int DutyHold(byte[] duties, int secs, int periodMs) {
+        if (duties.Any(d => d < 0x60 || d > 0xD0) || periodMs < 20) { Console.Error.WriteLine("duties 60..D0 (hex), period >= 20 ms"); return 2; }
+        using var ec = new Ec(); using var t = new AmdTemp(); using var sio = new SuperIo(1);
+        if (sio.Locked(() => sio.ChipId()) != 0x8227) { Console.Error.WriteLine("no IT8227 at 0x4E"); return 1; }
+        int Rpm(byte lo, byte hi) { int c = lo | hi << 8; return c == 0 ? 0 : 2_142_000 / c; }
+        var summary = new List<string>();
+        try {
+            WriteFanCtl(ec, 7);
+            Console.WriteLine($"{DateTime.Now:HH:mm:ss} level 7, settling 8 s");
+            Thread.Sleep(8000);
+            foreach (var duty in duties) {
+                Console.WriteLine($"{DateTime.Now:HH:mm:ss} holding duty 0x{duty:X2} for {secs} s");
+                var rpms = new List<int>(); int minOld = 0xFF, writes = 0;
+                var sw = System.Diagnostics.Stopwatch.StartNew(); long nextSample = 500;
+                while (sw.ElapsedMilliseconds < secs * 1000L) {
+                    byte old = sio.Locked(() => sio.I2ecWriteChecked(PwmDuty, v => v >= 0x50 && v <= Math.Max(duty, (byte)0x90), duty));
+                    writes++; if (sw.ElapsedMilliseconds > 3000) minOld = Math.Min(minOld, old);
+                    if (sw.ElapsedMilliseconds >= nextSample) {
+                        nextSample += 500;
+                        var (lo, hi) = sio.Locked(() => (sio.I2ecRead(PwmTach), sio.I2ecRead(PwmTach + 1)));
+                        int r = Rpm(lo, hi); double tc = t.Tctl();
+                        if (sw.ElapsedMilliseconds > 5000) rpms.Add(r);
+                        if (nextSample % 2000 == 500) Console.WriteLine($"  {sw.Elapsed.TotalSeconds,5:F1} s rpm≈{r} duty before rewrite 0x{old:X2} tctl={tc:F1}");
+                        if (tc >= 101) throw new Exception("too hot");
+                    }
+                    Thread.Sleep(periodMs);
+                }
+                var row = $"duty 0x{duty:X2} ({duty * 100 / 255} %): {rpms.Average():F0} rpm, {rpms.Min()}..{rpms.Max()} after 5 s; firmware pulled it to 0x{minOld:X2} at most between writes; {writes} writes";
+                summary.Add(row); Console.WriteLine(row);
+            }
+        } finally {
+            WriteFanCtl(ec, 0x80);
+            Console.WriteLine($"{DateTime.Now:HH:mm:ss} fan back to BIOS auto");
+            Console.WriteLine("== SUMMARY"); summary.ForEach(Console.WriteLine);
         }
         return 0;
     }
