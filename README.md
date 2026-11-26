@@ -122,6 +122,52 @@ Only for Cezanne / Barcelo (Ryzen 5000U / 7030U): other CPUs use other mailboxes
 | `tpfan smu-raw` | the PM table's limit section, raw, for comparing two tools |
 | `tpfan smu-set <hex id> <value>` | send one MP1 message, then print the limits |
 
+## Taskbar readout (tpfan-bar)
+
+[`bar/`](bar) draws one strip on the taskbar, just left of the tray, replacing HWiNFO's tray icons and XMeters.
+Left to right:
+
+| Item | Shows | Source |
+|---|---|---|
+| Mode | **E**co (green), **P**erformance (white), **M**aximum (red); grey while a switch is pending. **Click: next mode** | `mode=` in tpfan's `status.txt`; a click rewrites `"Mode"` in its config |
+| CPU | one green bar per physical core: the busier of its two threads | `\Processor Information(*)\% Processor Utility`, Task Manager's CPU figure |
+| Disk | orange pie: active time | `\PhysicalDisk(_Total)\% Idle Time` (active = 100 − idle, as in Task Manager) |
+| Network | ▲ send (blue) and ▼ receive (green) in Task Manager's units (Kbps, Mbps, Gbps) | `GetIfTable2`, hardware adapters only, so VPN tunnels aren't counted twice |
+| RAM | blue pie: memory in use | `GlobalMemoryStatusEx` |
+| CPU power, W | blue | Windows' RAPL performance counter `\Energy Meter(RAPL_Package0_PKG)\Power` |
+| CPU temperature, ° (Tctl) | white, yellow from 85, red from 95 | tpfan's `status.txt` (`--` when tpfan isn't running) |
+| Battery rate, W | green charging, amber discharging, grey `0` idle | `CallNtPowerInformation(SystemBatteryState)` |
+| Battery, % | white, amber at 30 % and red at 15 % on battery | `GetSystemPowerStatus` |
+
+Hover an item for the exact values (per-core loads, disk read/write speed, adapter names, memory and commit in GB,
+fan speed and step, time to full or empty). Click a meter for Task Manager; right-click for Task Manager, the
+tpfan log, Exit. Everything is drawn in pixel fonts (7×14 digits, 5×7 units), scaled by a whole number on larger
+taskbars, so it stays sharp.
+
+How it sits on the taskbar:
+
+- It is a layered (per-pixel alpha) **child window of `Shell_TrayWnd`**, so it hides with the taskbar (full-screen
+  apps, auto-hide) and never floats over other windows. It is a separate process: if it stops, the taskbar is
+  unaffected (unlike XMeters' deskband, which runs inside Explorer).
+- On the classic taskbar (StartAllBack, as here) it narrows the task buttons (`MSTaskSwWClass`) by its own width,
+  so nothing is underneath it; Exit gives the width back. Every 250 ms it checks its place and the task buttons'
+  width, so after a tray change it may be misplaced for up to a quarter second.
+- A hidden top-level window recreates it when Explorer restarts (`TaskbarCreated`). Errors go to
+  `%TEMP%\tpfan-bar.log`.
+- Not supported: vertical taskbars, the stock Windows 11 taskbar (no `TrayNotifyWnd` to sit next to) and
+  secondary monitors' taskbars.
+
+Cost, measured on 2026-11-26: 0.47 % of one core and 17 MB private memory, against 2.3 % and 51 MB for HWiNFO
+(sensors-only) alone. (tpfan's `EC OBF` errors, about one a minute, went on at the same rate without HWiNFO:
+they are collisions with Windows' own EC traffic.) It is plain Win32 with source-generated P/Invoke, so it can be
+built with NativeAOT for a smaller footprint once the "Desktop development with C++" build tools are installed.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\bar\install.ps1              # build, install to %LOCALAPPDATA%\Programs\tpfan-bar, start at logon
+powershell -ExecutionPolicy Bypass -File .\bar\install.ps1 -Aot         # the same, NativeAOT
+powershell -ExecutionPolicy Bypass -File .\bar\install.ps1 -Uninstall
+```
+
 ## Config
 
 ```jsonc

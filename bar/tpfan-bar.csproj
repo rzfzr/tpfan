@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Plain Win32 (no WinForms) and source-generated P/Invoke, so it can be published with NativeAOT:
+       dotnet publish bar -c Release -p:PublishAot=true   (needs the "Desktop development with C++" build tools).
+       Without them it is an ordinary framework-dependent app. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <IsAotCompatible>true</IsAotCompatible>
+    <RollForward>Major</RollForward>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>tpfan-bar</AssemblyName>
+    <RootNamespace>TpfanBar</RootNamespace>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <ServerGarbageCollector>false</ServerGarbageCollector>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <TieredPGO>false</TieredPGO>
+  </PropertyGroup>
+</Project>
