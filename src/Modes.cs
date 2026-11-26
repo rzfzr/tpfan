@@ -62,7 +62,7 @@ sealed class FanBoost {
     public string Ec { get; set; } = "40";        // 0x2F value; 0x40 = full speed (6300 rpm)
     public string Note { get; set; } = "6300 rpm";
     public double Temp { get; set; } = 97;        // smoothed Tctl at or above this
-    public double Load { get; set; } = 90;        // and smoothed CPU load (% of all threads) at or above this
+    public double Load { get; set; } = 70;        // and smoothed CPU load (% of all threads) at or above this
     public double AfterSec { get; set; } = 30;    // for this long (time below counts back down, not to zero)
     public double MinSec { get; set; } = 120;     // once on, at least this long
     public double ExitLoad { get; set; } = 60;    // off when the load is below this, or Tctl below ExitTemp,
