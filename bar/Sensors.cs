@@ -17,6 +17,9 @@ sealed unsafe partial class Sensors {
     public bool Ac, Charging, Discharging;
     public int Percent = -1;
     public string Fan = "";
+    public int Rpm = -1;          // last fan speed tpfan read (it reads it every 5 s; not while paused)
+    public bool FanForced;        // tpfan holds a step above BIOS auto (the 4200 rpm step)
+    public bool FanPaused;        // tpfan isn't touching the EC right now (display off, after wake)
     public string ModeApplied;   // mode tpfan reports as in force; null if none / tpfan not running
     public bool SmuError;
     public double CpuTotal = double.NaN;
@@ -99,7 +102,7 @@ sealed unsafe partial class Sensors {
     void ReadTpfan() {
         try {
             if ((DateTime.UtcNow - File.GetLastWriteTimeUtc(StatusFile)).TotalSeconds > 10) {
-                Tctl = double.NaN; Fan = "Fan: tpfan is not running"; ModeApplied = null; return;
+                Tctl = double.NaN; Fan = "Fan: tpfan is not running"; ModeApplied = null; Rpm = -1; FanForced = FanPaused = false; return;
             }
             string line;
             using (var f = new FileStream(StatusFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
@@ -114,6 +117,10 @@ sealed unsafe partial class Sensors {
             if (mode.Success) rest = rest.Substring(0, mode.Index);
             var rpm = Regex.Match(rest, @"rpm=(\d+)");
             var note = Regex.Match(rest, @"\(([^)]*)\)");
+            var step = Regex.Match(rest, @"step=(\d+)/");
+            FanPaused = rest.StartsWith("paused");
+            if (rpm.Success) Rpm = int.Parse(rpm.Groups[1].Value, CultureInfo.InvariantCulture);
+            if (!FanPaused) FanForced = step.Success && step.Groups[1].Value != "0";
             Fan = rest.StartsWith("paused") ? $"Fan: tpfan {rest}"
                 : rpm.Success ? $"Fan {rpm.Groups[1].Value} rpm" + (note.Success && !note.Groups[1].Value.Contains("rpm") ? $" ({note.Groups[1].Value})" : "")
                 : "Fan: " + rest;

@@ -136,11 +136,12 @@ Left to right:
 | RAM | blue pie: memory in use | `GlobalMemoryStatusEx` |
 | CPU power, W | blue | Windows' RAPL performance counter `\Energy Meter(RAPL_Package0_PKG)\Power` |
 | CPU temperature, ° (Tctl) | white, yellow from 85, red from 95 | tpfan's `status.txt` (`--` when tpfan isn't running) |
-| Battery rate, W | green charging, amber discharging, grey `0` idle | `CallNtPowerInformation(SystemBatteryState)` |
 | Battery, % | white, amber at 30 % and red at 15 % on battery | `GetSystemPowerStatus` |
+| Battery rate, W | green charging, amber discharging, grey `0` idle | `CallNtPowerInformation(SystemBatteryState)` |
+| Fan, rpm | white on the BIOS curve, yellow while tpfan holds the 4200 rpm step, grey while tpfan is paused (last reading). **Click: tpfan log** | `rpm=` and `step=` in tpfan's `status.txt` (read every 5 s) |
 
 Hover an item for the exact values (per-core loads, disk read/write speed, adapter names, memory and commit in GB,
-fan speed and step, time to full or empty). Click a meter for Task Manager; right-click for Task Manager, the
+fan speed and step, time to full or empty). Click a meter for Task Manager, the fan for the tpfan log; right-click for Task Manager, the
 tpfan log, Exit. Everything is drawn in pixel fonts (7×14 digits, 5×7 units), scaled by a whole number on larger
 taskbars, so it stays sharp.
 

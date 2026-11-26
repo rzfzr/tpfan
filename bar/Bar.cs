@@ -18,7 +18,7 @@ sealed unsafe class Bar {
     const string HostClass = "tpfanBarHost", StripClass = "tpfanBarStrip";
     const uint TimerLayout = 1, TimerData = 2;
 
-    enum Kind { Mode, Cpu, Disk, Net, Ram, Power, Temp, Rate, Battery }
+    enum Kind { Mode, Cpu, Disk, Net, Ram, Power, Temp, Battery, Rate, Fan }
     /// Gap = space to the next item. Mode items are one per mode (a 3-way switch); Mode holds its name.
     sealed class Item { public Kind Kind; public int X, W, Gap; public string Mode, Tip = ""; }
     string _modeNames = "";   // the modes the switch was laid out for
@@ -177,8 +177,9 @@ sealed unsafe class Bar {
             (Kind.Ram, Dia),
             (Kind.Power, NumBox("8.8") + unitGap + small),
             (Kind.Temp, NumBox("100") + unitGap + S(PixelFont.Small.Width("o"))),
-            (Kind.Rate, NumBox("8.8") + unitGap + small),
             (Kind.Battery, NumBox("100") + unitGap + S(PixelFont.Small.Width("%"))),
+            (Kind.Rate, NumBox("8.8") + unitGap + small),
+            (Kind.Fan, NumBox("8888") + unitGap + S(PixelFont.Small.Width("rpm"))),
         };
         _items.Clear();
         int x = S(6);
@@ -288,6 +289,11 @@ sealed unsafe class Bar {
                            p < 0 ? Palette.Grey(l) : p <= 15 && !_s.Ac ? Palette.Red(l) : p <= 30 && !_s.Ac ? Palette.Amber(l) : Palette.Text(l));
                     break;
                 }
+                case Kind.Fan:
+                    // white: BIOS curve; yellow: tpfan holds the 4200 rpm step; grey: tpfan paused (last reading)
+                    Number(x, NumBox("8888"), _s.Rpm < 0 ? "--" : _s.Rpm.ToString(Inv), "rpm",
+                           _s.Rpm < 0 || _s.FanPaused ? Palette.Grey(l) : _s.FanForced ? Palette.Yellow(l) : Palette.Text(l));
+                    break;
             }
         }
         Present();
@@ -328,6 +334,8 @@ sealed unsafe class Bar {
             if (mode != null && mode != _modes.Requested && _modes.Request(mode)) { Tooltips(); Draw(); }
         } else if (_items[i].Kind is Kind.Cpu or Kind.Disk or Kind.Net or Kind.Ram) {
             ShellExecute(IntPtr.Zero, "open", "taskmgr.exe", null, null, 1);
+        } else if (_items[i].Kind == Kind.Fan) {
+            ShellExecute(IntPtr.Zero, "open", Path.Combine(Sensors.TpfanDir, "tpfan.log"), null, null, 1);
         }
     }
 
@@ -390,6 +398,10 @@ sealed unsafe class Bar {
             case Kind.Power: return (double.IsNaN(_s.CpuW) ? "CPU power n/a" : $"CPU package power {_s.CpuW.ToString("0.0", Inv)} W") + "\n" + _s.Fan;
             case Kind.Temp: return (double.IsNaN(_s.Tctl) ? "CPU temperature n/a" : $"CPU temperature (Tctl) {_s.Tctl.ToString("0.0", Inv)} °C") + "\n" + _s.Fan;
             case Kind.Rate: case Kind.Battery: return BatteryTip();
+            case Kind.Fan:
+                return _s.Fan + (_s.FanPaused && _s.Rpm >= 0 ? $"\nLast reading {_s.Rpm} rpm" : "")
+                       + (_s.FanForced && !_s.FanPaused ? "\ntpfan holds the 4200 rpm step" : _s.Rpm >= 0 && !_s.FanPaused ? "\nBIOS fan curve" : "")
+                       + "\nClick: tpfan log";
         }
         return "";
     }
