@@ -189,7 +189,8 @@ bursts. The default config gives it to Maximum, at full speed (`0x40`, 6300 rpm)
 - **Off** (back to 4200 rpm) after 30 s, counted the same way, with the load < 60 % or Tctl < 90 °C. It ends on the
   load, not the temperature: with more cooling the CPU boosts higher and stays at its limit (99 °C), so the
   temperature only drops once the load does.
-- Switching to a mode without `FanBoost` ends it at once; so do display off, suspend and an EC pause.
+- Switching to a mode without `FanBoost` ends it at once; so do display off, suspend and sleep. The 5 s EC back-off
+  after a dropped read (about once a minute under load) keeps it, or the fan would swing down and back up.
 
 `status.txt` shows ` boost=<s>/30s load=<%>` while it builds up and ` boost=on` while it runs (the step is then
 one past the top, e.g. `step=2/2`); the log has `boost` and `unboost` lines. tpfan-bar draws the rpm red.

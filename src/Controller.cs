@@ -69,8 +69,13 @@ sealed class Controller {
     double _boostCredit;                  // seconds towards turning it on (or, while on, off); time against counts down
     DateTime _boostSince;
 
-    /// Forget the fan state, so the next cycle starts again from the current readings.
-    void ResetFan() { _idx = -1; _ema = double.NaN; _load = double.NaN; _boost = false; _boostCredit = 0; }
+    /// Forget the fan state, so the next cycle starts again from the current readings. An EC pause (the 5 s back-off
+    /// after a dropped read, about once a minute under load) keeps the boost: dropping it there would swing the fan
+    /// down and back up. Display off, suspend and sleep end it.
+    void ResetFan(bool keepBoost = false) {
+        _idx = -1; _ema = double.NaN;
+        if (!keepBoost) { _load = double.NaN; _boost = false; _boostCredit = 0; }
+    }
 
     /// Turns FanBoost on or off; returns the log reason, or null when nothing changed.
     string UpdateBoost(DateTime now, double dt) {
@@ -196,7 +201,7 @@ sealed class Controller {
         ReloadIfChanged();
         var steps = _steps;
 
-        if (dt >= 5) { Quiet(_cfg.QuietSec); Kick(3); Log($"{dt:F0} s gap (sleep?): EC resumes in {_cfg.QuietSec:F0} s"); }
+        if (dt >= 5) { ResetFan(); Quiet(_cfg.QuietSec); Kick(3); Log($"{dt:F0} s gap (sleep?): EC resumes in {_cfg.QuietSec:F0} s"); }
         ApplyMode(now);   // SMU and Windows only, no EC: also while the EC is paused
         if (_off) {
             if (_handback) {
@@ -205,7 +210,7 @@ sealed class Controller {
             }
             ResetFan(); Status(now, TctlOrNaN(amd), "paused (display off)"); return false;
         }
-        if (now.Ticks < Interlocked.Read(ref _quietUntil)) { ResetFan(); Status(now, TctlOrNaN(amd), "paused (EC quiet)"); return false; }
+        if (now.Ticks < Interlocked.Read(ref _quietUntil)) { ResetFan(keepBoost: true); Status(now, TctlOrNaN(amd), "paused (EC quiet)"); return false; }
 
         double t = amd.Tctl();
         if (t < 20 || t > 115) {   // implausible reading: let the BIOS drive the fan
