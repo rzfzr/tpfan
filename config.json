@@ -32,9 +32,9 @@
     { "Name": "Maximum", "TctlTemp": 99, "StapmLimit": 35, "FastLimit": 50, "SlowLimit": 35, "StapmTime": 20, "SlowTime": 45,
       "VrmCurrent": 40, "VrmMaxCurrent": 70, "VrmSocCurrent": 64, "VrmSocMaxCurrent": 70, "Boost": "max-performance",
       "PowerMode": "best-performance", "MaxFreqMHz": 0, "FanUp": 78, "FanDown": 70,
-      // Faster fan for long all-core loads (builds) only: smoothed Tctl >= 97 and CPU load >= 90 % for 120 s turns it
+      // Faster fan for long all-core loads (builds) only: smoothed Tctl >= 97 and CPU load >= 90 % for 30 s turns it
       // on; it stays at least 120 s and goes back to 4200 rpm after 30 s with load < 60 % or Tctl < 90.
-      "FanBoost": { "Ec": "40", "Note": "6300 rpm", "Temp": 97, "Load": 90, "AfterSec": 120, "MinSec": 120,
+      "FanBoost": { "Ec": "40", "Note": "6300 rpm", "Temp": 97, "Load": 90, "AfterSec": 30, "MinSec": 120,
                     "ExitLoad": 60, "ExitTemp": 90, "ExitSec": 30 } }
   ]
 }

@@ -183,7 +183,7 @@ A mode can have a `FanBoost`: a speed above the top step, for long all-core load
 bursts. The default config gives it to Maximum, at full speed (`0x40`, 6300 rpm):
 
 - **On** after the smoothed Tctl has been ≥ 97 °C *and* the smoothed CPU load (all threads, from `GetSystemTimes`)
-  ≥ 90 % for 120 s. Time that doesn't qualify counts back down instead of resetting, so a short dip in a build
+  ≥ 90 % for 30 s. Time that doesn't qualify counts back down instead of resetting, so a short dip in a build
   delays the boost without starting over.
 - **Stays on** at least 120 s, so it never comes on for a few seconds and goes away again.
 - **Off** (back to 4200 rpm) after 30 s, counted the same way, with the load < 60 % or Tctl < 90 °C. It ends on the
@@ -191,11 +191,11 @@ bursts. The default config gives it to Maximum, at full speed (`0x40`, 6300 rpm)
   temperature only drops once the load does.
 - Switching to a mode without `FanBoost` ends it at once; so do display off, suspend and an EC pause.
 
-`status.txt` shows ` boost=<s>/120s load=<%>` while it builds up and ` boost=on` while it runs (the step is then
+`status.txt` shows ` boost=<s>/30s load=<%>` while it builds up and ` boost=on` while it runs (the step is then
 one past the top, e.g. `step=2/2`); the log has `boost` and `unboost` lines. tpfan-bar draws the rpm red.
 
 ```jsonc
-"FanBoost": { "Ec": "40", "Note": "6300 rpm", "Temp": 97, "Load": 90, "AfterSec": 120, "MinSec": 120,
+"FanBoost": { "Ec": "40", "Note": "6300 rpm", "Temp": 97, "Load": 90, "AfterSec": 30, "MinSec": 120,
               "ExitLoad": 60, "ExitTemp": 90, "ExitSec": 30 }
 ```
 
