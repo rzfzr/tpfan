@@ -96,6 +96,8 @@ Elevated, with the service stopped (`Stop-Service tpfan`):
 | `tpfan dump` | hex dump of EC RAM `0x00–0xFF` |
 | `tpfan set <hex\|auto>` | write `0x2F` directly |
 | `tpfan probe [log]` | measure RPM for every level, then BIOS auto under full CPU load (~8 min) |
+| `tpfan sweep [hex,hex-hex,...] [s]` | hold each `0x2F` value for s seconds (default 12) and print the RPM it settles at |
+| `tpfan dither <low> <high> <ms> [% high] [s]` | alternate `0x2F` between two values and print the RPM every 250 ms |
 | `tpfan ec-sniff [s]` | watch the EC status register and list everyone else's transactions (default 60 s) |
 
 `status.txt` is rewritten every second. Tctl comes from the CPU, so it is reported even while EC access is

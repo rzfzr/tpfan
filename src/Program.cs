@@ -29,6 +29,8 @@ static class Program {
                 case "monitor": return Monitor(a.Length > 1 ? int.Parse(a[1]) : 10);
                 case "set": return Set(a[1]);
                 case "probe": return Probe(a.Length > 1 ? a[1] : "probe.log");
+                case "sweep": return Sweep(a.Length > 1 ? a[1] : "8,B,F,10,17,18,1F,20,27,28,2F,30,37,38,3F,41,47,48,4F,7F", a.Length > 2 ? int.Parse(a[2]) : 12);
+                case "dither": return Dither(Convert.ToByte(a[1], 16), Convert.ToByte(a[2], 16), int.Parse(a[3]), a.Length > 4 ? int.Parse(a[4]) : 50, a.Length > 5 ? int.Parse(a[5]) : 30);
                 case "ec-sniff": return Sniff(a.Length > 1 ? int.Parse(a[1]) : 60);
                 case "smu": {   // limits in force, from the PM table
                     using var smu = new Smu();
@@ -56,7 +58,8 @@ static class Program {
                     return 0;
                 }
                 default:
-                    Console.Error.WriteLine("usage: tpfan status | run [config] | check [config] | dump | monitor [s] | set <hex|auto> | probe [log]");
+                    Console.Error.WriteLine("usage: tpfan status | run [config] | check [config] | dump | monitor [s] | set <hex|auto> | probe [log]\n"
+                        + "       | sweep [hex,hex-hex,...] [s] | dither <low hex> <high hex> <period ms> [% high] [s] | ec-sniff [s] | smu | smu-raw | smu-set <hex> <value>");
                     return 2;
             }
         } catch (Exception e) { Console.Error.WriteLine(e); return 1; }
@@ -118,6 +121,74 @@ static class Program {
         byte b = v == "auto" ? (byte)0x80 : Convert.ToByte(v, 16);
         ec.Write(Tp.FanCtl, b); Thread.Sleep(100);
         Console.WriteLine($"2F=0x{ec.Read(Tp.FanCtl):X2}"); return 0;
+    }
+
+    // For the diagnostics below (service stopped): under load the EC drops reads more often, sometimes twice in a
+    // row, so a failed reading is skipped (-1) and a failed write is tried once more instead of ending the test.
+    static int TryRpm(Ec ec) { try { return Tp.Rpm(ec); } catch (TimeoutException) { return -1; } }
+    static string TryFanCtl(Ec ec) { try { return $"0x{ec.Read(Tp.FanCtl):X2}"; } catch (TimeoutException) { return "--"; } }
+    static void WriteFanCtl(Ec ec, byte v) { try { ec.Write(Tp.FanCtl, v); } catch (TimeoutException) { Thread.Sleep(50); ec.Write(Tp.FanCtl, v); } }
+
+    /// Writes each 0x2F value in the list ("8,10-17,41") for s seconds and prints the RPM it settles at (the average
+    /// of the last 4 readings, and their spread), starting and ending at 0x07 for reference. For finding speeds the
+    /// documented levels don't give. Hands the fan back to the BIOS at the end, or if Tctl reaches 101 °C (the SMU holds it at the mode's limit, 99 at most).
+    static int Sweep(string list, int secs) {
+        var values = new List<byte> { 7 };
+        foreach (var part in list.Split(',', StringSplitOptions.RemoveEmptyEntries)) {
+            var r = part.Split('-');
+            byte lo = Convert.ToByte(r[0], 16), hi = r.Length > 1 ? Convert.ToByte(r[1], 16) : lo;
+            for (int v = lo; v <= hi; v++) values.Add((byte)v);
+        }
+        values.Add(7);
+        using var ec = new Ec(); using var t = new AmdTemp();
+        var summary = new List<string>();
+        try {
+            foreach (var v in values) {
+                WriteFanCtl(ec, v);
+                var rpms = new List<int>();
+                for (int s = 0; s < secs; s++) {
+                    Thread.Sleep(1000);
+                    double tc = t.Tctl(); int rpm = TryRpm(ec);
+                    if (s >= secs - 4 && rpm >= 0) rpms.Add(rpm);
+                    Console.WriteLine($"  0x{v:X2} s={s,2} tctl={tc:F1} rpm={rpm} 2F={TryFanCtl(ec)}");
+                    if (tc >= 101) throw new Exception("too hot, aborting");   // above any limit the SMU holds
+                }
+                var row = rpms.Count == 0 ? $"0x{v:X2}: no reading" : $"0x{v:X2}: {rpms.Average(),5:F0} rpm (last 4: {rpms.Min()}..{rpms.Max()}), 2F reads {TryFanCtl(ec)}";
+                summary.Add(row); Console.WriteLine(row);
+            }
+        } finally {
+            WriteFanCtl(ec, 0x80);
+            Console.WriteLine("== SUMMARY"); summary.ForEach(Console.WriteLine);
+            Console.WriteLine("fan back to BIOS auto");
+        }
+        return 0;
+    }
+
+    /// Alternates 0x2F between two values (pct % of each period on the high one) for s seconds, reading the RPM
+    /// every 250 ms: shows whether the fan averages out to a speed in between or audibly swings. Test only: it
+    /// writes the EC several times a second, which the controller never does.
+    static int Dither(byte low, byte high, int periodMs, int pct, int secs) {
+        using var ec = new Ec();
+        var rpms = new List<int>();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        long nextRpm = 0; bool? on = null;
+        try {
+            while (sw.ElapsedMilliseconds < secs * 1000L) {
+                long ms = sw.ElapsedMilliseconds;
+                bool want = ms % periodMs < periodMs * pct / 100;
+                if (want != on) { WriteFanCtl(ec, want ? high : low); on = want; }
+                if (ms >= nextRpm) {
+                    nextRpm += 250;
+                    int rpm = TryRpm(ec);
+                    if (ms >= secs * 1000L / 3 && rpm >= 0) rpms.Add(rpm);   // skip the first third: settling
+                    Console.WriteLine($"  {ms / 1000.0,6:F2} s {(want ? "high" : "low "),-4} rpm={rpm}");
+                }
+                Thread.Sleep(10);
+            }
+        } finally { WriteFanCtl(ec, 0x80); }
+        if (rpms.Count == 0) { Console.WriteLine("no readings"); return 1; }
+        Console.WriteLine($"dither 0x{low:X2}/0x{high:X2} {periodMs} ms {pct} % high: {rpms.Average():F0} rpm, {rpms.Min()}..{rpms.Max()} after settling; fan back to BIOS auto");
+        return 0;
     }
 
     /// Steps through every fan level, records steady RPM and an EC dump for each, then measures
