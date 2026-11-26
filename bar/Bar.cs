@@ -176,7 +176,7 @@ sealed unsafe class Bar {
             (Kind.Disk, Dia),
             (Kind.Net, S(5) + S(3) + NetNum + S(2) + NetUnitW),
             (Kind.Ram, Dia),
-            (Kind.Power, NumBox("8.8") + unitGap + small),
+            (Kind.Power, NumBox("88") + unitGap + small),
             (Kind.Temp, TempW + S(8) + NumBox("8888") + unitGap + S(PixelFont.Small.Width("rpm"))),   // temperature + fan
             (Kind.Battery, NumBox("100") + unitGap + S(PixelFont.Small.Width("%")) + S(5) + ArrowW),   // charge + rate arrow
         };
@@ -268,7 +268,7 @@ sealed unsafe class Bar {
                     NetLine(x, top + lh + S(2), _s.RecvBps, "v", Palette.Recv(l));
                     break;
                 }
-                case Kind.Power: Number(x, NumBox("8.8"), double.IsNaN(_s.CpuW) ? "--" : Num(_s.CpuW), "W", Palette.Cpu(l)); break;
+                case Kind.Power: Number(x, NumBox("88"), double.IsNaN(_s.CpuW) ? "--" : Num(_s.CpuW), "W", Palette.Cpu(l)); break;
                 case Kind.Temp:
                     // temperature, then fan speed, as one item (one hover area and tooltip)
                     Number(x, NumBox("100"), double.IsNaN(_s.Tctl) ? "--" : Math.Round(_s.Tctl).ToString("0", Inv), "o",
@@ -437,8 +437,8 @@ sealed unsafe class Bar {
 
     // ---- formatting ----------------------------------------------------------------------------------------
 
-    /// One decimal under 10, whole numbers above (capped at 99): "8.7", "19".
-    static string Num(double v) => v < 9.95 ? v.ToString("0.0", Inv) : Math.Min(Math.Round(v, MidpointRounding.AwayFromZero), 99).ToString("0", Inv);
+    /// Whole watts, capped at 99: "4", "28".
+    static string Num(double v) => Math.Min(Math.Round(v, MidpointRounding.AwayFromZero), 99).ToString("0", Inv);
     static string Pct(double v) => double.IsNaN(v) ? "n/a" : v.ToString("0", Inv) + " %";
     static string Gb(double bytes) => (bytes / (1L << 30)).ToString("0.0", Inv);
     static string Bytes(double b) =>
