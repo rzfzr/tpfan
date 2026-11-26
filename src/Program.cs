@@ -32,6 +32,8 @@ static class Program {
                 case "sweep": return Sweep(a.Length > 1 ? a[1] : "8,B,F,10,17,18,1F,20,27,28,2F,30,37,38,3F,41,47,48,4F,7F", a.Length > 2 ? int.Parse(a[2]) : 12);
                 case "dither": return Dither(Convert.ToByte(a[1], 16), Convert.ToByte(a[2], 16), int.Parse(a[3]), a.Length > 4 ? int.Parse(a[4]) : 50, a.Length > 5 ? int.Parse(a[5]) : 30);
                 case "ec-sniff": return Sniff(a.Length > 1 ? int.Parse(a[1]) : 60);
+                case "sio": return Sio();
+                case "i2ec": return I2ec(Convert.ToUInt16(a[1], 16), a.Length > 2 ? Convert.ToInt32(a[2], 16) : 0x40, a.Length > 3 ? a[3] : null);
                 case "smu": {   // limits in force, from the PM table
                     using var smu = new Smu();
                     var t = smu.Table(out ulong ver);
@@ -72,6 +74,51 @@ static class Program {
         return sb.ToString();
     }
     static int Dump() { using var ec = new Ec(); Console.Write(Hex(DumpEc(ec))); return 0; }
+
+    /// Which Super I/O chips answer at 0x2E and 0x4E: chip id and revision, without and with ITE's config key.
+    static int Sio() {
+        for (int slot = 0; slot < 2; slot++) {
+            using var sio = new SuperIo(slot);
+            sio.Locked(() => {
+                ushort id = sio.ChipId();
+                Console.WriteLine($"0x{sio.Port:X2}: chip 0x{id:X4} rev 0x{sio.Read(0x22):X2}" + (SuperIo.IsIteEc(id) ? " (ITE EC)" : ""));
+                if (!SuperIo.IsIteEc(id)) {
+                    sio.Enter(); id = sio.ChipId();
+                    Console.WriteLine($"0x{sio.Port:X2} after the ITE key: chip 0x{id:X4} rev 0x{sio.Read(0x22):X2}" + (SuperIo.IsIteEc(id) ? " (ITE EC)" : ""));
+                }
+                return 0;
+            });
+        }
+        return 0;
+    }
+
+    /// Reads count bytes of the ITE EC's own address space from addr, through I2EC (read only), as hex or into a file.
+    static int I2ec(ushort addr, int count, string file) {
+        for (int slot = 0; slot < 2; slot++) {
+            using var sio = new SuperIo(slot);
+            int r = sio.Locked(() => {
+                ushort id = sio.ChipId();
+                if (!SuperIo.IsIteEc(id)) { sio.Enter(); id = sio.ChipId(); }
+                if (!SuperIo.IsIteEc(id)) return -1;
+                Console.WriteLine($"ITE EC 0x{id:X4} at 0x{sio.Port:X2}");
+                if (file != null) {
+                    var buf = new byte[count];
+                    for (int k = 0; k < count; k++) buf[k] = sio.I2ecRead((ushort)(addr + k));
+                    File.WriteAllBytes(file, buf);
+                    Console.WriteLine($"{count} bytes from 0x{addr:X4} -> {file}");
+                    return 0;
+                }
+                for (int row = 0; row < count; row += 16) {
+                    var bytes = Enumerable.Range(0, Math.Min(16, count - row)).Select(k => sio.I2ecRead((ushort)(addr + row + k)).ToString("X2"));
+                    Console.WriteLine($"{addr + row:X4}:  {string.Join(" ", bytes)}");
+                }
+                return 0;
+            });
+            if (r == 0) return 0;
+        }
+        Console.Error.WriteLine("no ITE EC found at 0x2E or 0x4E");
+        return 1;
+    }
 
     static string Line(Ec ec, AmdTemp t) {
         var temps = string.Join(",", Enumerable.Range(0x78, 8).Select(i => ec.Read((byte)i)));

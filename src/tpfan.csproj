@@ -11,6 +11,7 @@
     <EmbeddedResource Include="modules\LpcACPIEC.bin" LogicalName="LpcACPIEC.bin" />
     <EmbeddedResource Include="modules\AMDFamily17.bin" LogicalName="AMDFamily17.bin" />
     <EmbeddedResource Include="modules\RyzenSMU.bin" LogicalName="RyzenSMU.bin" />
+    <EmbeddedResource Include="modules\LpcIO.bin" LogicalName="LpcIO.bin" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="9.0.0" />

@@ -101,6 +101,8 @@ Elevated, with the service stopped (`Stop-Service tpfan`):
 | `tpfan sweep [hex,hex-hex,...] [s]` | hold each `0x2F` value for s seconds (default 12) and print the RPM it settles at |
 | `tpfan dither <low> <high> <ms> [% high] [s]` | alternate `0x2F` between two values and print the RPM every 250 ms |
 | `tpfan ec-sniff [s]` | watch the EC status register and list everyone else's transactions (default 60 s) |
+| `tpfan sio` | which Super I/O chip answers at 0x2E / 0x4E (here an ITE IT8227 EC at 0x4E) |
+| `tpfan i2ec <hex addr> [hex count] [file]` | read the ITE EC's own address space through I2EC (read only; e.g. `1800 40` = PWM block) |
 
 `status.txt` is rewritten every second. Tctl comes from the CPU, so it is reported even while EC access is
 paused (display off, after wake, after an EC error); only the fan part then says `paused (...)`.

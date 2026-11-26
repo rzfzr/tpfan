@@ -10,5 +10,9 @@ PawnIO only loads signed modules, which is why the binaries are kept here instea
 Tuning Utility 26.3.1's install (`Assets\AMD\PawnIO\RyzenSMU.bin`, SHA-256 `301d9ca3…3450`); tpfan uses it for the
 CPU modes.
 
+`LpcIO.bin` (Super I/O config registers at 0x2E/0x4E, used by `tpfan sio` / `tpfan i2ec`) is the same project's
+signed module, embedded in FanControl's LibreHardwareMonitorLib 0.9.4 (`LibreHardwareMonitor.Resources.PawnIo.LpcIO.bin`,
+SHA-256 `3dcf8b2b…d101`).
+
 They need the PawnIO driver installed (`C:\Program Files\PawnIO`, e.g. via FanControl, LibreHardwareMonitor or
 the installer from [pawnio.eu](https://pawnio.eu)).
