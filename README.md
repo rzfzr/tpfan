@@ -103,6 +103,7 @@ Elevated, with the service stopped (`Stop-Service tpfan`):
 | `tpfan ec-sniff [s]` | watch the EC status register and list everyone else's transactions (default 60 s) |
 | `tpfan sio` | which Super I/O chip answers at 0x2E / 0x4E (here an ITE IT8227 EC at 0x4E) |
 | `tpfan i2ec <hex addr> [hex count] [file]` | read the ITE EC's own address space through I2EC (read only; e.g. `1800 40` = PWM block) |
+| `tpfan duty-test <hex duty> [s]` | at level 7, write the fan PWM duty (`0x1804`) once and watch it: the firmware steps it back to its rpm target within ~3 s (0x9E: 5100 rpm, back to 4200) |
 
 `status.txt` is rewritten every second. Tctl comes from the CPU, so it is reported even while EC access is
 paused (display off, after wake, after an EC error); only the fan part then says `paused (...)`.

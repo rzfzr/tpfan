@@ -4,7 +4,8 @@ using System.Threading;
 /// The EC chip's Super I/O config space (ports 0x2E/0x2F or 0x4E/0x4F) through PawnIO's signed LpcIO module, and on
 /// ITE embedded controllers the I2EC window behind it: D2 registers via Super I/O registers 0x2E (index) / 0x2F
 /// (data); D2 0x11/0x10 = EC address high/low, D2 0x12 = data. That reaches the EC's whole address space (SRAM and
-/// its own peripherals, e.g. the PWM block at 0x1800), the way System76's ectool does. Diagnostics only: reads.
+/// its own peripherals, e.g. the PWM block at 0x1800), the way System76's ectool does. Diagnostics: reads, and one
+/// checked write (I2ecWriteChecked) for `tpfan duty-test`. This EC refuses I2EC reads of its SRAM (0x0000-0x0FFF).
 sealed class SuperIo : IDisposable {
     readonly PawnModule _m = new PawnModule("LpcIO.bin");
     readonly Mutex _mutex = new Mutex(false, @"Global\Access_ISABUS.HTP.Method");   // LibreHardwareMonitor's ISA bus lock
@@ -37,6 +38,18 @@ sealed class SuperIo : IDisposable {
     byte D2Read(byte r) { Write(0x2E, r); return Read(0x2F); }
     void D2Write(byte r, byte v) { Write(0x2E, r); Write(0x2F, v); }
     public byte I2ecRead(ushort addr) { D2Write(0x11, (byte)(addr >> 8)); D2Write(0x10, (byte)addr); return D2Read(0x12); }
+
+    /// Writes one byte of the EC's address space, only after reading the address registers back as addr and the
+    /// current value passing oldOk. Returns the old value, or throws without writing.
+    public byte I2ecWriteChecked(ushort addr, Func<byte, bool> oldOk, byte value) {
+        D2Write(0x11, (byte)(addr >> 8)); D2Write(0x10, (byte)addr);
+        byte hi = D2Read(0x11), lo = D2Read(0x10);
+        if (hi != (byte)(addr >> 8) || lo != (byte)addr) throw new InvalidOperationException($"I2EC address reads back 0x{hi:X2}{lo:X2}, not 0x{addr:X4}: not writing");
+        byte old = D2Read(0x12);
+        if (!oldOk(old)) throw new InvalidOperationException($"0x{addr:X4} holds 0x{old:X2}, not what was expected: not writing");
+        D2Write(0x12, value);
+        return old;
+    }
 
     public void Dispose() {
         try { if (_entered) Write(0x02, 0x02); } catch { }   // leave config mode

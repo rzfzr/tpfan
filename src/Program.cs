@@ -33,6 +33,7 @@ static class Program {
                 case "dither": return Dither(Convert.ToByte(a[1], 16), Convert.ToByte(a[2], 16), int.Parse(a[3]), a.Length > 4 ? int.Parse(a[4]) : 50, a.Length > 5 ? int.Parse(a[5]) : 30);
                 case "ec-sniff": return Sniff(a.Length > 1 ? int.Parse(a[1]) : 60);
                 case "sio": return Sio();
+                case "duty-test": return DutyTest(Convert.ToByte(a[1], 16), a.Length > 2 ? int.Parse(a[2]) : 15);
                 case "i2ec": return I2ec(Convert.ToUInt16(a[1], 16), a.Length > 2 ? Convert.ToInt32(a[2], 16) : 0x40, a.Length > 3 ? a[3] : null);
                 case "smu": {   // limits in force, from the PM table
                     using var smu = new Smu();
@@ -88,6 +89,40 @@ static class Program {
                 }
                 return 0;
             });
+        }
+        return 0;
+    }
+
+    const ushort PwmDuty = 0x1804, PwmTach = 0x181E;   // ITE IT8227: fan PWM duty (of 0xFF), tach count (low, high)
+
+    /// Writes the fan PWM duty directly while 0x2F holds level 7 (4200 rpm, duty ~0x6E), then watches whether the
+    /// EC firmware keeps it or pulls it back. Writes nothing unless the I2EC address reads back as 0x1804 and the
+    /// current duty looks like level 7. Ends with the fan back in BIOS auto. Stop the service first.
+    static int DutyTest(byte duty, int secs) {
+        if (duty < 0x60 || duty > 0xD0) { Console.Error.WriteLine("duty must be 60..D0 (hex)"); return 2; }
+        using var ec = new Ec(); using var t = new AmdTemp(); using var sio = new SuperIo(1);
+        if (sio.Locked(() => sio.ChipId()) != 0x8227) { Console.Error.WriteLine("no IT8227 at 0x4E"); return 1; }
+        int Rpm(byte lo, byte hi) { int c = lo | hi << 8; return c == 0 ? 0 : 2_142_000 / c; }   // rpm * count ~ 2.14e6, measured
+        void Sample(double s) {
+            var (d, lo, hi) = sio.Locked(() => (sio.I2ecRead(PwmDuty), sio.I2ecRead(PwmTach), sio.I2ecRead(PwmTach + 1)));
+            Console.WriteLine($"  {s,5:F2} s duty=0x{d:X2} tach≈{Rpm(lo, hi)} rpm tctl={t.Tctl():F1}");
+        }
+        try {
+            WriteFanCtl(ec, 7);
+            Console.WriteLine("level 7, settling 10 s");
+            for (int i = 0; i < 10; i++) { Thread.Sleep(1000); if (t.Tctl() >= 101) throw new Exception("too hot"); }
+            Sample(0);
+            byte old = sio.Locked(() => sio.I2ecWriteChecked(PwmDuty, v => v >= 0x50 && v <= 0x90, duty));
+            Console.WriteLine($"wrote duty 0x{duty:X2} (was 0x{old:X2})");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < secs * 1000L) {
+                Thread.Sleep(250); Sample(sw.Elapsed.TotalSeconds);
+                if (t.Tctl() >= 101) throw new Exception("too hot");
+            }
+            Console.WriteLine($"EC rpm reading: {TryRpm(ec)}");
+        } finally {
+            WriteFanCtl(ec, 0x80);
+            Console.WriteLine("fan back to BIOS auto");
         }
         return 0;
     }
