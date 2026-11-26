@@ -54,26 +54,29 @@ sealed class CpuMode {
     }
 }
 
-/// The fan above the top step (4200 rpm), only while the CPU has sat at its temperature limit under a full load for
-/// a long time: a long build, not a burst. Once on it stays on for a while, so the fan never jumps up for a few
-/// seconds and back. It ends on the load, not the temperature: with more cooling the CPU only boosts higher and
-/// stays at its limit, so the temperature drops only once the load does.
+/// The fan above the top step (4200 rpm), only while the CPU has sat at its temperature limit for a while: a long
+/// build, or one core held at the limit, not a burst. Once on it stays on for a while, so the fan never jumps up for
+/// a few seconds and back, and it lasts as long as the CPU stays hot. Load and ExitLoad optionally add a CPU load
+/// condition (left out = temperature only).
 sealed class FanBoost {
     public string Ec { get; set; } = "40";        // 0x2F value; 0x40 = full speed (6300 rpm)
     public string Note { get; set; } = "6300 rpm";
-    public double Temp { get; set; } = 97;        // smoothed Tctl at or above this
-    public double Load { get; set; } = 70;        // and smoothed CPU load (% of all threads) at or above this
+    public double Temp { get; set; } = 97;        // on: smoothed Tctl at or above this
+    public double? Load { get; set; }             // and, if set, smoothed CPU load (% of all threads) at or above this
     public double AfterSec { get; set; } = 30;    // for this long (time below counts back down, not to zero)
     public double MinSec { get; set; } = 120;     // once on, at least this long
-    public double ExitLoad { get; set; } = 60;    // off when the load is below this, or Tctl below ExitTemp,
-    public double ExitTemp { get; set; } = 90;
+    public double ExitTemp { get; set; } = 90;    // off: smoothed Tctl below this
+    public double? ExitLoad { get; set; }         // or, if set, the load below this
     public double ExitSec { get; set; } = 30;     // for this long (counted the same way)
     internal byte Value => Convert.ToByte(Ec, 16);
+
+    public bool Qualifies(double tctl, double load) => tctl >= Temp && !(load < Load);
+    public bool Ends(double tctl, double load) => tctl < ExitTemp || load < ExitLoad;
 
     public void Validate(string mode) {
         _ = Value;
         if (Temp > 100 || ExitTemp >= Temp) throw new System.IO.InvalidDataException($"mode {mode}: FanBoost Temp at most 100, ExitTemp below it");
-        if (Load > 100 || ExitLoad >= Load) throw new System.IO.InvalidDataException($"mode {mode}: FanBoost Load at most 100, ExitLoad below it");
+        if (Load > 100 || ExitLoad >= Load || (ExitLoad != null && Load == null)) throw new System.IO.InvalidDataException($"mode {mode}: FanBoost Load at most 100, ExitLoad below it and only with Load");
         if (AfterSec < 0 || MinSec < 0 || ExitSec < 0) throw new System.IO.InvalidDataException($"mode {mode}: FanBoost times can't be negative");
     }
 }

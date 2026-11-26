@@ -131,7 +131,7 @@ sealed unsafe partial class Sensors {
             if (!FanPaused) {
                 FanBoost = boost.Success && boost.Groups[1].Value == "on";
                 BoostTip = !boost.Success ? "" : FanBoost ? "Long-load boost on"
-                    : boost.Groups[2].Value == "0" ? "" : $"Long-load boost in {int.Parse(boost.Groups[3].Value) - int.Parse(boost.Groups[2].Value)} s if the load stays";
+                    : boost.Groups[2].Value == "0" ? "" : $"Long-load boost in {int.Parse(boost.Groups[3].Value) - int.Parse(boost.Groups[2].Value)} s if it stays hot";
             }
             Fan = rest.StartsWith("paused") ? $"Fan: tpfan {rest}"
                 : rpm.Success ? $"Fan {rpm.Groups[1].Value} rpm" + (note.Success && !note.Groups[1].Value.Contains("rpm") ? $" ({note.Groups[1].Value})" : "")

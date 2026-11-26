@@ -81,8 +81,8 @@ sealed class Controller {
     string UpdateBoost(DateTime now, double dt) {
         var fb = _cfg.CurrentMode?.FanBoost;
         if (fb == null) { _boostCredit = 0; if (!_boost) return null; _boost = false; return "unboost (mode)"; }
-        if (double.IsNaN(_load)) return null;
-        bool towards = _boost ? _load < fb.ExitLoad || _ema < fb.ExitTemp : _load >= fb.Load && _ema >= fb.Temp;
+        if (double.IsNaN(_load) && fb.Load != null) return null;
+        bool towards = _boost ? fb.Ends(_ema, _load) : fb.Qualifies(_ema, _load);
         _boostCredit = Math.Max(0, _boostCredit + (towards ? dt : -dt));
         if (!_boost && _boostCredit >= fb.AfterSec) { _boost = true; _boostSince = now; _boostCredit = 0; return "boost"; }
         if (_boost && _boostCredit >= fb.ExitSec && (now - _boostSince).TotalSeconds >= fb.MinSec) { _boost = false; _boostCredit = 0; return "unboost"; }

@@ -27,8 +27,8 @@ register below `0x100` exposes the auto targets, so they can't be set directly.
 - **Above it:** when the 6-second average of Tctl reaches 85 °C, the fan goes to 4200 rpm (level 7). It returns
   to BIOS auto after 25 s below 78 °C.
 - **Emergency:** raw Tctl ≥ 95 °C for 5 s jumps to the top step.
-- **Long-load boost:** above 4200 rpm only in a mode with `FanBoost` (Maximum), and only for long all-core loads
-  such as builds; see [Long-load boost](#long-load-boost-fanboost). Otherwise full speed (6300 rpm) is never used:
+- **Long-load boost:** above 4200 rpm only in a mode with `FanBoost` (Maximum), and only while the CPU stays at its
+  limit; see [Long-load boost](#long-load-boost-fanboost). Otherwise full speed (6300 rpm) is never used:
   it's far above anything the BIOS does.
 - **Fail-safe:** service stop or shutdown and an implausible Tctl put the fan back in BIOS auto; display off
   and suspend do too (see below). A crash exits non-zero and the service restarts.
@@ -179,25 +179,26 @@ powershell -ExecutionPolicy Bypass -File .\bar\install.ps1 -Uninstall
 
 ## Long-load boost (FanBoost)
 
-A mode can have a `FanBoost`: a speed above the top step, for long all-core loads only (a big build), never for
-bursts. The default config gives it to Maximum, at full speed (`0x40`, 6300 rpm):
+A mode can have a `FanBoost`: a speed above the top step, for when the CPU stays at its temperature limit (a long
+build, or a core held at the limit by a long single-threaded job), never for bursts. The default config gives it to
+Maximum, at full speed (`0x40`, 6300 rpm):
 
-- **On** after the smoothed Tctl has been ≥ 97 °C *and* the smoothed CPU load (all threads, from `GetSystemTimes`)
-  ≥ 70 % for 30 s. Time that doesn't qualify counts back down instead of resetting, so a short dip in a build
-  delays the boost without starting over.
+- **On** after the smoothed Tctl has been ≥ 97 °C for 30 s. Time below counts back down instead of resetting, so a
+  short dip delays the boost without starting over.
 - **Stays on** at least 120 s, so it never comes on for a few seconds and goes away again.
-- **Off** (back to 4200 rpm) after 30 s, counted the same way, with the load < 60 % or Tctl < 90 °C. It ends on the
-  load, not the temperature: with more cooling the CPU boosts higher and stays at its limit (99 °C), so the
-  temperature only drops once the load does.
+- **Off** (back to 4200 rpm) after 30 s, counted the same way, below 90 °C. With more cooling the CPU boosts higher
+  and stays at its limit (99 °C), so it lasts as long as the work does.
 - Switching to a mode without `FanBoost` ends it at once; so do display off, suspend and sleep. The 5 s EC back-off
   after a dropped read (about once a minute under load) keeps it, or the fan would swing down and back up.
+- Optional `Load` and `ExitLoad` (% of all threads busy, from `GetSystemTimes`) add a load condition: on only with
+  the load ≥ `Load`, off also when it drops below `ExitLoad`. It was tried at 70/60 %: one thread held at 100 °C by
+  Windows Update (23 % load) then got no boost, so the default config leaves them out.
 
 `status.txt` shows ` boost=<s>/30s load=<%>` while it builds up and ` boost=on` while it runs (the step is then
 one past the top, e.g. `step=2/2`); the log has `boost` and `unboost` lines. tpfan-bar draws the rpm red.
 
 ```jsonc
-"FanBoost": { "Ec": "40", "Note": "6300 rpm", "Temp": 97, "Load": 70, "AfterSec": 30, "MinSec": 120,
-              "ExitLoad": 60, "ExitTemp": 90, "ExitSec": 30 }
+"FanBoost": { "Ec": "40", "Note": "6300 rpm", "Temp": 97, "AfterSec": 30, "MinSec": 120, "ExitTemp": 90, "ExitSec": 30 }
 ```
 
 No speed between 4200 and 6300 rpm was found (2026-11-26, under a full load):
