@@ -19,7 +19,11 @@ sealed unsafe partial class Sensors {
     public string Fan = "";
     public int Rpm = -1;          // last fan speed tpfan read (it reads it every 5 s; not while paused)
     public bool FanForced;        // tpfan holds a step above BIOS auto (the 4200 rpm step)
-    public bool FanPaused;        // tpfan isn't touching the EC right now (display off, after wake)
+    public bool FanPaused;        // tpfan isn't touching the EC right now (display off, after wake, error back-off)
+    DateTime _rpmAt;              // when a status line last carried a fan reading
+    /// The fan reading is older than 15 s: tpfan has been paused longer than its 5 s back-off after an EC error
+    /// (display on, wake), or isn't running.
+    public bool RpmStale => Rpm < 0 || (DateTime.UtcNow - _rpmAt).TotalSeconds > 15;
     public string ModeApplied;   // mode tpfan reports as in force; null if none / tpfan not running
     public bool SmuError;
     public double CpuTotal = double.NaN;
@@ -119,7 +123,7 @@ sealed unsafe partial class Sensors {
             var note = Regex.Match(rest, @"\(([^)]*)\)");
             var step = Regex.Match(rest, @"step=(\d+)/");
             FanPaused = rest.StartsWith("paused");
-            if (rpm.Success) Rpm = int.Parse(rpm.Groups[1].Value, CultureInfo.InvariantCulture);
+            if (rpm.Success) { Rpm = int.Parse(rpm.Groups[1].Value, CultureInfo.InvariantCulture); _rpmAt = DateTime.UtcNow; }
             if (!FanPaused) FanForced = step.Success && step.Groups[1].Value != "0";
             Fan = rest.StartsWith("paused") ? $"Fan: tpfan {rest}"
                 : rpm.Success ? $"Fan {rpm.Groups[1].Value} rpm" + (note.Success && !note.Groups[1].Value.Contains("rpm") ? $" ({note.Groups[1].Value})" : "")

@@ -273,9 +273,9 @@ sealed unsafe class Bar {
                     // temperature, then fan speed, as one item (one hover area and tooltip)
                     Number(x, NumBox("100"), double.IsNaN(_s.Tctl) ? "--" : Math.Round(_s.Tctl).ToString("0", Inv), "o",
                            double.IsNaN(_s.Tctl) ? Palette.Grey(l) : _s.Tctl >= 95 ? Palette.Red(l) : _s.Tctl >= 85 ? Palette.Yellow(l) : Palette.Text(l));
-                    // fan: white = BIOS curve, yellow = tpfan holds the 4200 rpm step, grey = tpfan paused (last reading)
+                    // fan: white = BIOS curve, yellow = tpfan holds the 4200 rpm step, grey = the reading is over 15 s old (tpfan paused longer than an error back-off)
                     Number(x + TempW + S(8), NumBox("8888"), _s.Rpm < 0 ? "--" : _s.Rpm.ToString(Inv), "rpm",
-                           _s.Rpm < 0 || _s.FanPaused ? Palette.Grey(l) : _s.FanForced ? Palette.Yellow(l) : Palette.Text(l));
+                           _s.RpmStale ? Palette.Grey(l) : _s.FanForced ? Palette.Yellow(l) : Palette.Text(l));
                     break;
                 case Kind.Battery: {
                     // charge, then the rate arrow, as one item (one hover area and tooltip)
@@ -418,7 +418,7 @@ sealed unsafe class Bar {
             case Kind.Temp:
                 return (double.IsNaN(_s.Tctl) ? "CPU temperature n/a" : $"CPU temperature (Tctl) {_s.Tctl.ToString("0.0", Inv)} °C")
                        + "\n" + _s.Fan + (_s.FanPaused && _s.Rpm >= 0 ? $", last reading {_s.Rpm} rpm" : "")
-                       + (_s.FanForced && !_s.FanPaused ? "\ntpfan holds the 4200 rpm step" : _s.Rpm >= 0 && !_s.FanPaused ? "\nBIOS fan curve" : "")
+                       + (_s.FanForced && !_s.RpmStale ? "\ntpfan holds the 4200 rpm step" : !_s.RpmStale ? "\nBIOS fan curve" : "")
                        + "\nClick: tpfan log";
             case Kind.Battery: return BatteryTip();
         }
