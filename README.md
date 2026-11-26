@@ -185,7 +185,7 @@ powershell -ExecutionPolicy Bypass -File .\bar\install.ps1 -Uninstall
 
 A mode can have a `FanBoost`: a speed above the top step, for when the CPU stays at its temperature limit (a long
 build, or a core held at the limit by a long single-threaded job), never for bursts. The default config gives it to
-Maximum, at full speed (`0x40`, 6300 rpm):
+Maximum, at **5300 rpm**, a speed between the EC's own levels (see [In-between speeds](#in-between-speeds-duty)):
 
 - **On** after the smoothed Tctl has been ≥ 97 °C for 30 s. Time below counts back down instead of resetting, so a
   short dip delays the boost without starting over.
@@ -202,8 +202,27 @@ Maximum, at full speed (`0x40`, 6300 rpm):
 one past the top, e.g. `step=2/2`); the log has `boost` and `unboost` lines. tpfan-bar draws the rpm red.
 
 ```jsonc
-"FanBoost": { "Ec": "40", "Note": "6300 rpm", "Temp": 97, "AfterSec": 30, "MinSec": 120, "ExitTemp": 90, "ExitSec": 30 }
+"FanBoost": { "Ec": "7", "Duty": "9E", "Note": "5300 rpm", "Temp": 97, "AfterSec": 30, "MinSec": 120, "ExitTemp": 90, "ExitSec": 30 }
 ```
+
+Without `Duty`, the boost is just the `0x2F` value in `Ec` (`"40"` = full speed, 6300 rpm).
+
+### In-between speeds (Duty)
+
+`0x2F` only gives 2200, 2500, 4200 and 6300 rpm, but the EC (an ITE IT8227, found by `tpfan sio` at Super I/O 0x4E)
+drives the fan with a PWM duty at its register `0x1804`, reachable through I2EC with PawnIO's LpcIO module. At each
+level the firmware steps that duty towards its rpm target, about one count every 50 ms (`tpfan duty-test`: 0x9E
+reached 5100 rpm, then was back at 4200 within 3 s). Rewritten every 100 ms, the duty holds (`tpfan duty-hold`,
+2026-11-26, 30 s each): 0x88 = 4817 rpm, 0x9E = 5320, 0xB4 = 5775, all within ±15 rpm, the firmware never more than 3
+counts back, and no audible wobble.
+
+So a boost with `"Duty"` sets `0x2F` to its level (`"Ec"`, 3..7) and a background thread rewrites the duty every
+100 ms. Every write is checked first: the I2EC address must read back as `0x1804` and the duty must lie between
+level 7's (~0x6E) and the held one, so nothing is written if the EC is in another state. If the IT8227 isn't found,
+or the writes fail for a second, the boost runs at full speed instead (logged). If tpfan stops or crashes, the
+firmware is back at its own 4200 rpm target within ~3 s. None of it uses the ACPI EC ports, so it can't collide
+with Windows' EC traffic. The EC refuses I2EC reads of its RAM (where its rpm targets are), so the targets
+themselves can't be changed this way.
 
 No speed between 4200 and 6300 rpm was found (2026-11-26, under a full load):
 

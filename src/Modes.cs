@@ -68,13 +68,19 @@ sealed class FanBoost {
     public double ExitTemp { get; set; } = 90;    // off: smoothed Tctl below this
     public double? ExitLoad { get; set; }         // or, if set, the load below this
     public double ExitSec { get; set; } = 30;     // for this long (counted the same way)
+    // Optional PWM duty (hex, of FF) held on top of level Ec (3..7) through I2EC, for a speed between the EC's levels:
+    // 9E = 5300 rpm, 88 = 4800, B4 = 5800 (IT8227 only; see DutyHold). Unavailable or failing -> full speed (0x40).
+    public string Duty { get; set; }
     internal byte Value => Convert.ToByte(Ec, 16);
+    internal byte? DutyValue => Duty == null ? null : Convert.ToByte(Duty, 16);
 
     public bool Qualifies(double tctl, double load) => tctl >= Temp && !(load < Load);
     public bool Ends(double tctl, double load) => tctl < ExitTemp || load < ExitLoad;
 
     public void Validate(string mode) {
         _ = Value;
+        if (DutyValue is byte d && (d < 0x60 || d > 0xD0 || Value < 3 || Value > 7))
+            throw new System.IO.InvalidDataException($"mode {mode}: FanBoost Duty must be 60..D0 (hex) with Ec a level 3..7");
         if (Temp > 100 || ExitTemp >= Temp) throw new System.IO.InvalidDataException($"mode {mode}: FanBoost Temp at most 100, ExitTemp below it");
         if (Load > 100 || ExitLoad >= Load || (ExitLoad != null && Load == null)) throw new System.IO.InvalidDataException($"mode {mode}: FanBoost Load at most 100, ExitLoad below it and only with Load");
         if (AfterSec < 0 || MinSec < 0 || ExitSec < 0) throw new System.IO.InvalidDataException($"mode {mode}: FanBoost times can't be negative");

@@ -68,13 +68,25 @@ sealed class Controller {
     bool _boost;
     double _boostCredit;                  // seconds towards turning it on (or, while on, off); time against counts down
     DateTime _boostSince;
+    DutyHold _hold;                       // null when the EC isn't an IT8227 (or LpcIO can't load)
+    bool _holdFailed;                     // the duty hold failed during this boost: full speed instead
 
     /// Forget the fan state, so the next cycle starts again from the current readings. An EC pause (the 5 s back-off
     /// after a dropped read, about once a minute under load) keeps the boost: dropping it there would swing the fan
     /// down and back up. Display off, suspend and sleep end it.
     void ResetFan(bool keepBoost = false) {
         _idx = -1; _ema = double.NaN;
-        if (!keepBoost) { _load = double.NaN; _boost = false; _boostCredit = 0; }
+        if (!keepBoost) { _load = double.NaN; _boost = false; _boostCredit = 0; _holdFailed = false; _hold?.Hold(null); }
+    }
+
+    /// The 0x2F value for the boost, and the duty hold that goes with it: Duty on top of level Ec through DutyHold,
+    /// or full speed when the boost has no Duty, the hold isn't available or it failed.
+    byte BoostValue(FanBoost fb) {
+        if (fb.DutyValue is not byte duty) { _hold?.Hold(null); return fb.Value; }
+        if (_hold != null && !_holdFailed && _hold.Error is string err) { _holdFailed = true; Log($"duty hold failed ({err}): boost at full speed"); }
+        if (_hold == null || _holdFailed) { _hold?.Hold(null); return 0x40; }
+        _hold.Hold(duty);
+        return fb.Value;
     }
 
     /// Turns FanBoost on or off; returns the log reason, or null when nothing changed.
@@ -167,6 +179,7 @@ sealed class Controller {
         using var ec = new Ec();
         using var amd = new AmdTemp();
         try { _smu = new Smu(); } catch (Exception e) { Log("SMU not available, modes only set Windows and the fan: " + e.Message); }
+        try { _hold = new DutyHold(); } catch (Exception e) { Log("fan duty hold not available, a FanBoost Duty runs at full speed: " + e.Message); }
         ReloadIfChanged();
         Log("start");
         PowerWatch.Start(OnPower, () => Kick(2));
@@ -188,6 +201,7 @@ sealed class Controller {
                 }
             }
         } finally {
+            _hold?.Dispose();   // stop holding the duty before handing the fan back
             try { ec.Write(Tp.FanCtl, 0x80); } catch { }
             _smu?.Dispose();
             Log("stop: fan handed back to BIOS (0x80)");
@@ -242,7 +256,8 @@ sealed class Controller {
             if ((now - _belowSince).TotalSeconds >= _cfg.DownHoldSec) { _idx--; why = "down"; _belowSince = DateTime.MaxValue; }
         }
 
-        byte want = _boost ? fb.Value : steps[_idx].Value;
+        if (!_boost) { _hold?.Hold(null); _holdFailed = false; }
+        byte want = _boost ? BoostValue(fb) : steps[_idx].Value;
         if (_applied != want) {
             ec.Write(Tp.FanCtl, want); _applied = want; _lastVerify = now; _oddCount = 0;
             if (why == null) why = "apply";
@@ -266,7 +281,7 @@ sealed class Controller {
 
         if ((now - _lastRpm).TotalSeconds >= _cfg.VerifySec) { _lastRpm = now; _rpm = Tp.Rpm(ec); }
         string boost = fb == null ? "" : _boost ? $" boost=on load={_load:F0}" : $" boost={_boostCredit:F0}/{fb.AfterSec:F0}s load={_load:F0}";
-        Status(now, t, $"step={shown}/{top} ({(_boost ? fb.Note : steps[_idx].Note)}) ec=0x{want:X2} rpm={_rpm}{boost}");
+        Status(now, t, $"step={shown}/{top} ({(!_boost ? steps[_idx].Note : fb.DutyValue != null && want == 0x40 ? "full speed, duty hold off" : fb.Note)}) ec=0x{want:X2} rpm={_rpm}{boost}");
         return true;
     }
 

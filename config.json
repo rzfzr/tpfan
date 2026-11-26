@@ -33,7 +33,9 @@
       "VrmCurrent": 40, "VrmMaxCurrent": 70, "VrmSocCurrent": 64, "VrmSocMaxCurrent": 70, "Boost": "max-performance",
       "PowerMode": "best-performance", "MaxFreqMHz": 0, "FanUp": 78, "FanDown": 70,
       // Faster fan while the CPU stays at its limit: smoothed Tctl >= 97 for 30 s turns it on; it stays at least
-      // 120 s and goes back to 4200 rpm after 30 s below 90. Optional "Load"/"ExitLoad" (%) add a CPU load condition.
-      "FanBoost": { "Ec": "40", "Note": "6300 rpm", "Temp": 97, "AfterSec": 30, "MinSec": 120, "ExitTemp": 90, "ExitSec": 30 } }
+      // 120 s and goes back to 4200 rpm after 30 s below 90. "Duty" holds the PWM duty on top of level 7 for a speed
+      // between the EC's levels (9E = 5300 rpm); without it, "Ec": "40" is full speed (6300). Optional "Load"/"ExitLoad"
+      // (%) add a CPU load condition.
+      "FanBoost": { "Ec": "7", "Duty": "9E", "Note": "5300 rpm", "Temp": 97, "AfterSec": 30, "MinSec": 120, "ExitTemp": 90, "ExitSec": 30 } }
   ]
 }

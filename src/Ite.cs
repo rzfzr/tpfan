@@ -4,8 +4,8 @@ using System.Threading;
 /// The EC chip's Super I/O config space (ports 0x2E/0x2F or 0x4E/0x4F) through PawnIO's signed LpcIO module, and on
 /// ITE embedded controllers the I2EC window behind it: D2 registers via Super I/O registers 0x2E (index) / 0x2F
 /// (data); D2 0x11/0x10 = EC address high/low, D2 0x12 = data. That reaches the EC's whole address space (SRAM and
-/// its own peripherals, e.g. the PWM block at 0x1800), the way System76's ectool does. Diagnostics: reads, and one
-/// checked write (I2ecWriteChecked) for `tpfan duty-test`. This EC refuses I2EC reads of its SRAM (0x0000-0x0FFF).
+/// its own peripherals, e.g. the PWM block at 0x1800), the way System76's ectool does. Reads, and checked writes
+/// (I2ecWriteChecked) of the fan duty for DutyHold and the duty tests. This EC refuses I2EC reads of its SRAM (0x0000-0x0FFF).
 sealed class SuperIo : IDisposable {
     readonly PawnModule _m = new PawnModule("LpcIO.bin");
     readonly Mutex _mutex = new Mutex(false, @"Global\Access_ISABUS.HTP.Method");   // LibreHardwareMonitor's ISA bus lock
@@ -55,4 +55,46 @@ sealed class SuperIo : IDisposable {
         try { if (_entered) Write(0x02, 0x02); } catch { }   // leave config mode
         _m.Dispose(); _mutex.Dispose();
     }
+}
+
+/// Holds the fan's PWM duty (IT8227 register 0x1804) at a value between the EC's own levels. With 0x2F at a level
+/// (3..7: 4200 rpm) the firmware steers the duty back towards its target by about one count every 50 ms, so it is
+/// rewritten every 100 ms: measured 2026-11-26, the fan then holds within ±15 rpm (0x9E = 5320 rpm) and the
+/// firmware never gets more than 3 counts back. If this stops (crash, service stop) the firmware returns to its own
+/// target within ~3 s. Every write is checked: the I2EC address must read back as 0x1804 and the duty must lie
+/// between level 7's and the held one, so nothing is written if the EC is in another state.
+sealed class DutyHold : IDisposable {
+    const ushort Pwm = 0x1804;
+    readonly SuperIo _sio;
+    readonly Thread _thread;
+    volatile int _want = -1;      // duty to hold, -1 = none
+    volatile bool _stop;
+    /// Why the last second of writes failed, or null. The controller then falls back to full speed.
+    public volatile string Error;
+
+    public DutyHold() {
+        _sio = new SuperIo(1);
+        ushort id = _sio.Locked(() => _sio.ChipId());
+        if (id != 0x8227) { _sio.Dispose(); throw new System.IO.IOException($"no IT8227 EC at 0x4E (chip 0x{id:X4})"); }
+        _thread = new Thread(Loop) { IsBackground = true, Name = "duty hold" };
+        _thread.Start();
+    }
+
+    public void Hold(byte? duty) => _want = duty ?? -1;
+
+    void Loop() {
+        int fails = 0;
+        while (!_stop) {
+            int w = _want;
+            if (w < 0) { fails = 0; Error = null; }
+            else {
+                byte d = (byte)w;
+                try { _sio.Locked(() => _sio.I2ecWriteChecked(Pwm, v => v >= 0x50 && v <= Math.Max(d, (byte)0x90), d)); fails = 0; Error = null; }
+                catch (Exception e) { if (++fails >= 10 && Error == null) Error = e.Message; }
+            }
+            Thread.Sleep(100);
+        }
+    }
+
+    public void Dispose() { _stop = true; _thread.Join(1000); _sio.Dispose(); }
 }
