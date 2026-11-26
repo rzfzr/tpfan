@@ -92,6 +92,9 @@ Elevated, with the service stopped (`Stop-Service tpfan`):
 | `tpfan set <hex\|auto>` | write `0x2F` directly |
 | `tpfan probe [log]` | measure RPM for every level, then BIOS auto under full CPU load (~8 min) |
 
+`status.txt` is rewritten every second. Tctl comes from the CPU, so it is reported even while EC access is
+paused (display off, after wake, after an EC error); only the fan part then says `paused (...)`.
+
 ## Config
 
 ```jsonc

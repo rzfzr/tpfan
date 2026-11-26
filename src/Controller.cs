@@ -119,9 +119,9 @@ sealed class Controller {
                 _handback = false;
                 if (_applied != 0x80) { ec.Write(Tp.FanCtl, 0x80); _applied = 0x80; }
             }
-            _idx = -1; _ema = double.NaN; Status(now, double.NaN, "paused (display off)"); return false;
+            _idx = -1; _ema = double.NaN; Status(now, TctlOrNaN(amd), "paused (display off)"); return false;
         }
-        if (now.Ticks < Interlocked.Read(ref _quietUntil)) { _idx = -1; _ema = double.NaN; Status(now, double.NaN, "paused (EC quiet)"); return false; }
+        if (now.Ticks < Interlocked.Read(ref _quietUntil)) { _idx = -1; _ema = double.NaN; Status(now, TctlOrNaN(amd), "paused (EC quiet)"); return false; }
 
         double t = amd.Tctl();
         if (t < 20 || t > 115) {   // implausible reading: let the BIOS drive the fan
@@ -172,6 +172,10 @@ sealed class Controller {
         Status(now, t, $"step={_idx}/{steps.Count - 1} ({steps[_idx].Note}) ec=0x{want:X2} rpm={_rpm}");
         return true;
     }
+
+    // Tctl comes from the CPU (SMN), not the EC, so it is still read while EC access is paused: status.txt
+    // keeps a temperature for readers such as tpfan-bar. Errors only cost the reading.
+    static double TctlOrNaN(AmdTemp amd) { try { return amd.Tctl(); } catch { return double.NaN; } }
 
     void Status(DateTime now, double t, string s) {
         if ((now - _lastStatus).TotalSeconds < 1) return;
