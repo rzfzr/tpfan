@@ -145,11 +145,11 @@ Left to right:
 | Network | ▲ send (blue) and ▼ receive (green) in Task Manager's units: whole Kbps, Mbps and Gbps with one decimal below 100 | `GetIfTable2`, hardware adapters only, so VPN tunnels aren't counted twice |
 | RAM | blue pie: memory in use | `GlobalMemoryStatusEx` |
 | CPU power, W | blue | Windows' RAPL performance counter `\Energy Meter(RAPL_Package0_PKG)\Power` |
-| CPU temperature and fan | Tctl in ° (white, yellow from 85, red from 95), then the fan in rpm (white on the BIOS curve, yellow while tpfan holds the 4200 rpm step, grey when the reading is over 15 s old, i.e. tpfan has paused longer than its 5 s back-off after an EC error (display on, wake)). One tooltip. **Click: tpfan log** | tpfan's `status.txt`: `tctl=`, `rpm=` (read every 5 s) and `step=`; `--` when tpfan isn't running |
+| CPU temperature and fan | Tctl in ° (white, yellow from 85, red from 95), then the fan in rpm (white on the BIOS curve, yellow while tpfan holds the 4200 rpm step, red while the long-load boost is on, grey when the reading is over 15 s old, i.e. tpfan has paused longer than its 5 s back-off after an EC error (display on, wake)). One tooltip. **Click: tpfan log** | tpfan's `status.txt`: `tctl=`, `rpm=` (read every 5 s) and `step=`; `--` when tpfan isn't running |
 | Battery | the charge in % (white, amber at 30 % and red at 15 % on battery), then a full-height arrow for the rate: up while charging, down while discharging, its colour the watts (discharging: yellow, orange at 18 W, red from 35 W; charging: green to cyan at 45 W); a grey dash when plugged in and not charging. One tooltip: charge, exact watts, time to full or empty | `GetSystemPowerStatus`, `CallNtPowerInformation(SystemBatteryState)` |
 
 Hover an item for the exact values (per-core loads, disk read/write speed, adapter names, memory and commit in GB,
-fan speed and step, time to full or empty). Click a meter for Task Manager, the temperature and fan for the tpfan log; right-click for Task Manager, the
+fan speed and step, long-load boost progress, time to full or empty). Click a meter for Task Manager, the temperature and fan for the tpfan log; right-click for Task Manager, the
 tpfan log, Exit. Everything is drawn in pixel fonts (7×14 digits, 5×11 for the network, 5×7 units), scaled by a whole number on larger
 taskbars, so it stays sharp.
 

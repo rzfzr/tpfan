@@ -19,6 +19,8 @@ sealed unsafe partial class Sensors {
     public string Fan = "";
     public int Rpm = -1;          // last fan speed tpfan read (it reads it every 5 s; not while paused)
     public bool FanForced;        // tpfan holds a step above BIOS auto (the 4200 rpm step)
+    public bool FanBoost;         // the mode's FanBoost is on (the speed above 4200 rpm, long all-core loads)
+    public string BoostTip = "";  // FanBoost progress for the tooltip, "" when the mode has none
     public bool FanPaused;        // tpfan isn't touching the EC right now (display off, after wake, error back-off)
     DateTime _rpmAt;              // when a status line last carried a fan reading
     /// The fan reading is older than 15 s: tpfan has been paused longer than its 5 s back-off after an EC error
@@ -125,6 +127,12 @@ sealed unsafe partial class Sensors {
             FanPaused = rest.StartsWith("paused");
             if (rpm.Success) { Rpm = int.Parse(rpm.Groups[1].Value, CultureInfo.InvariantCulture); _rpmAt = DateTime.UtcNow; }
             if (!FanPaused) FanForced = step.Success && step.Groups[1].Value != "0";
+            var boost = Regex.Match(rest, @" boost=(on|(\d+)/(\d+)s)");
+            if (!FanPaused) {
+                FanBoost = boost.Success && boost.Groups[1].Value == "on";
+                BoostTip = !boost.Success ? "" : FanBoost ? "Long-load boost on"
+                    : boost.Groups[2].Value == "0" ? "" : $"Long-load boost in {int.Parse(boost.Groups[3].Value) - int.Parse(boost.Groups[2].Value)} s if the load stays";
+            }
             Fan = rest.StartsWith("paused") ? $"Fan: tpfan {rest}"
                 : rpm.Success ? $"Fan {rpm.Groups[1].Value} rpm" + (note.Success && !note.Groups[1].Value.Contains("rpm") ? $" ({note.Groups[1].Value})" : "")
                 : "Fan: " + rest;

@@ -273,9 +273,10 @@ sealed unsafe class Bar {
                     // temperature, then fan speed, as one item (one hover area and tooltip)
                     Number(x, NumBox("100"), double.IsNaN(_s.Tctl) ? "--" : Math.Round(_s.Tctl).ToString("0", Inv), "o",
                            double.IsNaN(_s.Tctl) ? Palette.Grey(l) : _s.Tctl >= 95 ? Palette.Red(l) : _s.Tctl >= 85 ? Palette.Yellow(l) : Palette.Text(l));
-                    // fan: white = BIOS curve, yellow = tpfan holds the 4200 rpm step, grey = the reading is over 15 s old (tpfan paused longer than an error back-off)
+                    // fan: white = BIOS curve, yellow = tpfan holds the 4200 rpm step, red = the long-load boost above it,
+                    // grey = the reading is over 15 s old (tpfan paused longer than an error back-off)
                     Number(x + TempW + S(8), NumBox("8888"), _s.Rpm < 0 ? "--" : _s.Rpm.ToString(Inv), "rpm",
-                           _s.RpmStale ? Palette.Grey(l) : _s.FanForced ? Palette.Yellow(l) : Palette.Text(l));
+                           _s.RpmStale ? Palette.Grey(l) : _s.FanBoost ? Palette.Red(l) : _s.FanForced ? Palette.Yellow(l) : Palette.Text(l));
                     break;
                 case Kind.Battery: {
                     // charge, then the rate arrow, as one item (one hover area and tooltip)
@@ -418,7 +419,8 @@ sealed unsafe class Bar {
             case Kind.Temp:
                 return (double.IsNaN(_s.Tctl) ? "CPU temperature n/a" : $"CPU temperature (Tctl) {_s.Tctl.ToString("0.0", Inv)} °C")
                        + "\n" + _s.Fan + (_s.FanPaused && _s.Rpm >= 0 ? $", last reading {_s.Rpm} rpm" : "")
-                       + (_s.FanForced && !_s.RpmStale ? "\ntpfan holds the 4200 rpm step" : !_s.RpmStale ? "\nBIOS fan curve" : "")
+                       + (_s.RpmStale || _s.FanBoost ? "" : _s.FanForced ? "\ntpfan holds the 4200 rpm step" : "\nBIOS fan curve")
+                       + (_s.RpmStale || _s.BoostTip == "" ? "" : "\n" + _s.BoostTip)
                        + "\nClick: tpfan log";
             case Kind.Battery: return BatteryTip();
         }
