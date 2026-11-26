@@ -279,14 +279,14 @@ sealed unsafe class Bar {
                     break;
                 case Kind.Rate: {
                     // up (green) while charging, down while discharging (amber, red from 25 W); length = watts,
-                    // full height at 45 W charging / 40 W discharging; a grey dash when plugged in and idle
+                    // full height at 45 W charging / 35 W discharging; a grey dash when plugged in and idle
                     double w = Math.Abs(_s.RateW);
                     int aw = it.W, ah = Math.Min(S(18), _h - S(6)), ay = (_h - ah) / 2;
                     bool idle = double.IsNaN(w) || w < 0.05 || (!_s.Charging && !_s.Discharging);
                     if (idle) { c.Fill(x, ay + ah / 2 - _scale / 2, aw, _scale, Palette.Grey(l)); break; }
                     int sh = Math.Max(1, aw / 6);
                     c.Fill(x + aw / 2 - sh, ay, 2 * sh + 1, ah, Palette.Track(l));   // full-scale track behind the arrow
-                    double full = _s.Charging ? 45 : 40;
+                    double full = _s.Charging ? 45 : 35;
                     int len = Math.Max(S(5), (int)Math.Round(Math.Min(w / full, 1) * ah));
                     var color = _s.Charging ? Palette.Green(l) : w >= 25 ? Palette.Red(l) : Palette.Amber(l);
                     c.Arrow(x, ay, aw, ah, _s.Charging, len, color);
