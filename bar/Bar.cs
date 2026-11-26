@@ -18,7 +18,7 @@ sealed unsafe class Bar {
     const string HostClass = "tpfanBarHost", StripClass = "tpfanBarStrip";
     const uint TimerLayout = 1, TimerData = 2;
 
-    enum Kind { Mode, Cpu, Disk, Net, Ram, Power, Temp, Battery, Rate, Fan }
+    enum Kind { Mode, Cpu, Disk, Net, Ram, Power, Temp, Battery, Fan }
     /// Gap = space to the next item. Mode items are one per mode (a 3-way switch); Mode holds its name.
     sealed class Item { public Kind Kind; public int X, W, Gap; public string Mode, Tip = ""; }
     string _modeNames = "";   // the modes the switch was laid out for
@@ -177,8 +177,7 @@ sealed unsafe class Bar {
             (Kind.Ram, Dia),
             (Kind.Power, NumBox("8.8") + unitGap + small),
             (Kind.Temp, NumBox("100") + unitGap + S(PixelFont.Small.Width("o"))),
-            (Kind.Battery, NumBox("100") + unitGap + S(PixelFont.Small.Width("%"))),
-            (Kind.Rate, 2 * S(3) + 1),   // an arrow, odd width so it has a centre column
+            (Kind.Battery, NumBox("100") + unitGap + S(PixelFont.Small.Width("%")) + S(5) + ArrowW),   // charge + rate arrow
             (Kind.Fan, NumBox("8888") + unitGap + S(PixelFont.Small.Width("rpm"))),
         };
         _items.Clear();
@@ -277,25 +276,12 @@ sealed unsafe class Bar {
                     Number(x, NumBox("100"), double.IsNaN(_s.Tctl) ? "--" : Math.Round(_s.Tctl).ToString("0", Inv), "o",
                            double.IsNaN(_s.Tctl) ? Palette.Grey(l) : _s.Tctl >= 95 ? Palette.Red(l) : _s.Tctl >= 85 ? Palette.Yellow(l) : Palette.Text(l));
                     break;
-                case Kind.Rate: {
-                    // up (green) while charging, down while discharging (amber, red from 25 W); length = watts,
-                    // full height at 45 W charging / 35 W discharging; a grey dash when plugged in and idle
-                    double w = Math.Abs(_s.RateW);
-                    int aw = it.W, ah = Math.Min(S(18), _h - S(6)), ay = (_h - ah) / 2;
-                    bool idle = double.IsNaN(w) || w < 0.05 || (!_s.Charging && !_s.Discharging);
-                    if (idle) { c.Fill(x, ay + ah / 2 - _scale / 2, aw, _scale, Palette.Grey(l)); break; }
-                    int sh = Math.Max(1, aw / 6);
-                    c.Fill(x + aw / 2 - sh, ay, 2 * sh + 1, ah, Palette.Track(l));   // full-scale track behind the arrow
-                    double full = _s.Charging ? 45 : 35;
-                    int len = Math.Max(S(5), (int)Math.Round(Math.Min(w / full, 1) * ah));
-                    var color = _s.Charging ? Palette.Green(l) : w >= 25 ? Palette.Red(l) : Palette.Amber(l);
-                    c.Arrow(x, ay, aw, ah, _s.Charging, len, color);
-                    break;
-                }
                 case Kind.Battery: {
+                    // charge, then the rate arrow, as one item (one hover area and tooltip)
                     int p = _s.Percent;
                     Number(x, NumBox("100"), p < 0 ? "--" : p.ToString(Inv), "%",
                            p < 0 ? Palette.Grey(l) : p <= 15 && !_s.Ac ? Palette.Red(l) : p <= 30 && !_s.Ac ? Palette.Amber(l) : Palette.Text(l));
+                    RateArrow(x + it.W - ArrowW);
                     break;
                 }
                 case Kind.Fan:
@@ -306,6 +292,25 @@ sealed unsafe class Bar {
             }
         }
         Present();
+    }
+
+    int ArrowW => 2 * S(3) + 1;   // odd, so the arrow has a centre column
+
+    /// Battery rate: up (green) while charging, down while discharging (amber, red from 25 W); its length is the
+    /// watts, full height at 45 W charging / 35 W discharging; a grey dash when plugged in and idle.
+    void RateArrow(int x) {
+        var c = _canvas; bool l = _light;
+        double w = Math.Abs(_s.RateW);
+        int aw = ArrowW, ah = Math.Min(S(18), _h - S(6)), ay = (_h - ah) / 2;
+        if (_s.Percent < 0) return;
+        bool idle = double.IsNaN(w) || w < 0.05 || (!_s.Charging && !_s.Discharging);
+        if (idle) { c.Fill(x, ay + ah / 2 - _scale / 2, aw, _scale, Palette.Grey(l)); return; }
+        int sh = Math.Max(1, aw / 6);
+        c.Fill(x + aw / 2 - sh, ay, 2 * sh + 1, ah, Palette.Track(l));   // full-scale track behind the arrow
+        double full = _s.Charging ? 45 : 35;
+        int len = Math.Max(S(5), (int)Math.Round(Math.Min(w / full, 1) * ah));
+        var color = _s.Charging ? Palette.Green(l) : w >= 25 ? Palette.Red(l) : Palette.Amber(l);
+        c.Arrow(x, ay, aw, ah, _s.Charging, len, color);
     }
 
     /// A big number right-aligned in its box, then a small unit on the same baseline.
@@ -406,7 +411,7 @@ sealed unsafe class Bar {
             case Kind.Ram: return $"Memory {Pct(_s.RamPercent)} in use\n{Gb(_s.RamUsed)} of {Gb(_s.RamTotal)} GB\nCommitted {Gb(_s.CommitUsed)} of {Gb(_s.CommitLimit)} GB";
             case Kind.Power: return (double.IsNaN(_s.CpuW) ? "CPU power n/a" : $"CPU package power {_s.CpuW.ToString("0.0", Inv)} W") + "\n" + _s.Fan;
             case Kind.Temp: return (double.IsNaN(_s.Tctl) ? "CPU temperature n/a" : $"CPU temperature (Tctl) {_s.Tctl.ToString("0.0", Inv)} °C") + "\n" + _s.Fan;
-            case Kind.Rate: case Kind.Battery: return BatteryTip();
+            case Kind.Battery: return BatteryTip();
             case Kind.Fan:
                 return _s.Fan + (_s.FanPaused && _s.Rpm >= 0 ? $"\nLast reading {_s.Rpm} rpm" : "")
                        + (_s.FanForced && !_s.FanPaused ? "\ntpfan holds the 4200 rpm step" : _s.Rpm >= 0 && !_s.FanPaused ? "\nBIOS fan curve" : "")
