@@ -146,6 +146,18 @@ sealed class Canvas {
         }
     }
 
+    /// An arrow in a w x h box (w odd): up grows from the bottom, down from the top, `length` pixels long
+    /// (head included). The head is a triangle as wide as the box, the shaft a third of it.
+    public void Arrow(int x, int y, int w, int h, bool up, int length, Rgba c) {
+        length = Math.Clamp(length, 0, h);
+        int cx = x + w / 2, max = w / 2, head = Math.Min(length, max + 1), shaft = Math.Max(1, w / 6);
+        for (int k = 0; k < length; k++) {
+            int row = up ? y + h - length + k : y + length - 1 - k;   // k = 0 is the tip
+            int half = k < head ? Math.Min(k, max) : shaft;           // 45° head, then the shaft
+            Fill(cx - half, row, 2 * half + 1, 1, c);
+        }
+    }
+
     /// A circle of diameter d at (x, y) filling clockwise from 12 o'clock; antialiased by 4x4 supersampling.
     public void Pie(double pct, int x, int y, int d, double ring, Rgba fill, Rgba ringColor) {
         double r = d / 2.0, cx = x + r, cy = y + r, sweep = double.IsNaN(pct) ? -1 : Math.Clamp(pct, 0, 100) / 100 * 2 * Math.PI;

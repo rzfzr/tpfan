@@ -178,7 +178,7 @@ sealed unsafe class Bar {
             (Kind.Power, NumBox("8.8") + unitGap + small),
             (Kind.Temp, NumBox("100") + unitGap + S(PixelFont.Small.Width("o"))),
             (Kind.Battery, NumBox("100") + unitGap + S(PixelFont.Small.Width("%"))),
-            (Kind.Rate, NumBox("8.8") + unitGap + small),
+            (Kind.Rate, 2 * S(3) + 1),   // an arrow, odd width so it has a centre column
             (Kind.Fan, NumBox("8888") + unitGap + S(PixelFont.Small.Width("rpm"))),
         };
         _items.Clear();
@@ -278,9 +278,18 @@ sealed unsafe class Bar {
                            double.IsNaN(_s.Tctl) ? Palette.Grey(l) : _s.Tctl >= 95 ? Palette.Red(l) : _s.Tctl >= 85 ? Palette.Yellow(l) : Palette.Text(l));
                     break;
                 case Kind.Rate: {
+                    // up (green) while charging, down while discharging (amber, red from 25 W); length = watts,
+                    // full height at 45 W charging / 40 W discharging; a grey dash when plugged in and idle
                     double w = Math.Abs(_s.RateW);
+                    int aw = it.W, ah = Math.Min(S(18), _h - S(6)), ay = (_h - ah) / 2;
                     bool idle = double.IsNaN(w) || w < 0.05 || (!_s.Charging && !_s.Discharging);
-                    Number(x, NumBox("8.8"), idle ? "0" : Num(w), "W", idle ? Palette.Grey(l) : _s.Charging ? Palette.Green(l) : Palette.Amber(l));
+                    if (idle) { c.Fill(x, ay + ah / 2 - _scale / 2, aw, _scale, Palette.Grey(l)); break; }
+                    int sh = Math.Max(1, aw / 6);
+                    c.Fill(x + aw / 2 - sh, ay, 2 * sh + 1, ah, Palette.Track(l));   // full-scale track behind the arrow
+                    double full = _s.Charging ? 45 : 40;
+                    int len = Math.Max(S(5), (int)Math.Round(Math.Min(w / full, 1) * ah));
+                    var color = _s.Charging ? Palette.Green(l) : w >= 25 ? Palette.Red(l) : Palette.Amber(l);
+                    c.Arrow(x, ay, aw, ah, _s.Charging, len, color);
                     break;
                 }
                 case Kind.Battery: {

@@ -137,7 +137,7 @@ Left to right:
 | CPU power, W | blue | Windows' RAPL performance counter `\Energy Meter(RAPL_Package0_PKG)\Power` |
 | CPU temperature, ° (Tctl) | white, yellow from 85, red from 95 | tpfan's `status.txt` (`--` when tpfan isn't running) |
 | Battery, % | white, amber at 30 % and red at 15 % on battery | `GetSystemPowerStatus` |
-| Battery rate, W | green charging, amber discharging, grey `0` idle | `CallNtPowerInformation(SystemBatteryState)` |
+| Battery rate | an arrow: up and green while charging, down while discharging (amber, red from 25 W); its length is the watts (full height at 45 W charging, 40 W discharging); a grey dash when plugged in and not charging. Exact watts in the tooltip | `CallNtPowerInformation(SystemBatteryState)` |
 | Fan, rpm | white on the BIOS curve, yellow while tpfan holds the 4200 rpm step, grey while tpfan is paused (last reading). **Click: tpfan log** | `rpm=` and `step=` in tpfan's `status.txt` (read every 5 s) |
 
 Hover an item for the exact values (per-core loads, disk read/write speed, adapter names, memory and commit in GB,
